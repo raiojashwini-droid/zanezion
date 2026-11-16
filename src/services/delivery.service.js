@@ -382,7 +382,142 @@ export const createDelivery = async (data, performerId, tenantId) => {
   return newDelivery;
 };
 
+export const ensureDeliveryForOrder = async (orderOrId, tx = null) => {
+  const client = tx || prisma;
+  const order = typeof orderOrId === 'object' ? orderOrId : await client.order.findUnique({
+    where: { id: Number(orderOrId) },
+    include: { items: { include: { item: true } }, client: true }
+  });
+  if (!order || !order.id) return null;
+
+  const existingDelivery = await client.delivery.findFirst({
+    where: { orderId: order.id }
+  });
+  if (existingDelivery) return existingDelivery;
+
+  let meta = {};
+  if (typeof order.metadata === 'string') {
+    try {
+      meta = JSON.parse(order.metadata) || {};
+    } catch (_) {
+      meta = {};
+    }
+  } else if (order.metadata && typeof order.metadata === 'object') {
+    meta = order.metadata;
+  }
+
+  // Ensure a valid warehouse exists
+  let warehouse = await client.warehouse.findFirst({
+    where: { ...(order.tenantId != null && { tenantId: order.tenantId }) }
+  });
+  if (!warehouse) {
+    warehouse = await client.warehouse.findFirst();
+  }
+  if (!warehouse) {
+    warehouse = await client.warehouse.create({
+      data: {
+        name: 'Main Distribution Hub',
+        location: 'Central Depot',
+        tenantId: order.tenantId || 1
+      }
+    });
+  }
+
+  // Ensure a valid clientId
+  let clientIdToUse = order.clientId;
+  if (!clientIdToUse) {
+    const cl = await client.client.findFirst({
+      where: { ...(order.tenantId != null && { tenantId: order.tenantId }) }
+    });
+    if (cl) {
+      clientIdToUse = cl.id;
+    } else {
+      const anyClient = await client.client.findFirst();
+      if (anyClient) {
+        clientIdToUse = anyClient.id;
+      } else {
+        const defaultClient = await client.client.create({
+          data: {
+            companyName: 'General Client',
+            contactPerson: 'Default Client',
+            email: 'client@zanezion.com',
+            tenantId: order.tenantId || 1
+          }
+        });
+        clientIdToUse = defaultClient.id;
+      }
+    }
+  }
+
+  // Generate unique delivery number
+  const lastDelivery = await client.delivery.findFirst({ orderBy: { id: 'desc' } });
+  const nextNum = lastDelivery ? lastDelivery.id + 1 : 1;
+  const deliveryNumber = `DEL-${new Date().getFullYear()}-${String(nextNum).padStart(4, '0')}`;
+
+  const isChauffeur = order.orderType === 'CHAUFFEUR' || String(order.orderType || '').toUpperCase() === 'CHAUFFEUR';
+  const pickupLocation = meta.pickupLocation || meta.pickup_location || order.pickupLocation || order.pickup_location || 'Warehouse Depot';
+  const dropLocation = meta.dropLocation || meta.drop_location || meta.location || meta.deliveryAddress || order.location || order.deliveryAddress || 'Client Destination';
+
+  // Construct manifest items list
+  let manifestItems = [];
+  if (Array.isArray(meta.manifestItems) && meta.manifestItems.length > 0) {
+    manifestItems = meta.manifestItems;
+  } else if (Array.isArray(meta.customItems) && meta.customItems.length > 0) {
+    manifestItems = meta.customItems;
+  } else if (Array.isArray(order.items) && order.items.length > 0) {
+    manifestItems = order.items.map(it => ({
+      name: it.name || it.item?.name || 'Asset Item',
+      qty: it.quantity || it.qty || 1,
+      price: it.price || it.unitPrice || 0
+    }));
+  } else {
+    manifestItems = [{ name: meta.name || 'Order Package #' + order.id, qty: 1 }];
+  }
+
+  const remarksData = {
+    manifestItems,
+    items: manifestItems,
+    customer_name: meta.customer_name || meta.client_name || order.client?.companyName || null,
+    delivery_instructions: meta.delivery_instructions || null,
+    route: dropLocation || ''
+  };
+
+  return await client.delivery.create({
+    data: {
+      tenantId: order.tenantId || 1,
+      deliveryNumber,
+      orderId: order.id,
+      clientId: clientIdToUse,
+      warehouseId: warehouse.id,
+      status: 'pending',
+      missionType: isChauffeur ? 'Chauffeur' : 'Delivery',
+      transportMode: meta.deliveryType || meta.delivery_mode || 'Road',
+      vehicleRef: meta.plateNumber || meta.vehicleId || null,
+      pickupLocation,
+      dropLocation,
+      remarks: JSON.stringify(remarksData)
+    }
+  });
+};
+
 export const getDeliveries = async (tenantId, query) => {
+  // Auto-heal: Ensure all orders currently in 'logistics' status have a corresponding Delivery row
+  try {
+    const unmappedOrders = await prisma.order.findMany({
+      where: {
+        ...(tenantId !== null && { tenantId }),
+        status: { in: ['logistics', 'ready_for_delivery', 'LOGISTICS', 'Logistics', 'assigned', 'Assigned', 'accepted', 'Accepted'] },
+        deliveries: { none: {} }
+      },
+      include: { items: { include: { item: true } }, client: true }
+    });
+    for (const ord of unmappedOrders) {
+      await ensureDeliveryForOrder(ord);
+    }
+  } catch (err) {
+    console.error("Auto-heal unmapped deliveries error:", err);
+  }
+
   return await deliveryRepo.findAllDeliveries(tenantId, query);
 };
 

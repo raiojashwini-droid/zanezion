@@ -1,6 +1,7 @@
 import * as orderRepo from '../repositories/order.repository.js';
 import * as clientRepo from '../repositories/client.repository.js';
 import * as employeeRepo from '../repositories/employee.repository.js';
+import { ensureDeliveryForOrder } from './delivery.service.js';
 import prisma from '../config/db.js';
 import AppError from '../utils/AppError.js';
 import { logAudit } from '../utils/audit.js';
@@ -575,6 +576,8 @@ export const updateOrderStatus = async (id, status, tenantId, performerId, remar
         },
         data: { status: 'assigned' }
       }).catch(() => null);
+    } else if (['logistics', 'operation', 'ready_for_delivery'].includes(normStatus)) {
+      await ensureDeliveryForOrder(order, tx).catch((err) => console.error("Auto-create delivery error on logistics routing:", err));
     } else if (['cancelled', 'rejected', 'canceled'].includes(normStatus)) {
       await tx.delivery.updateMany({
         where: { orderId: realOrderId },

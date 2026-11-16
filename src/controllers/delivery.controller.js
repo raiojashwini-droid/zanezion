@@ -40,7 +40,7 @@ export const getDeliveries = async (req, res, next) => {
       } else {
         req.query.clientId = -1; // Unlinked customer has 0 deliveries
       }
-    } else if (['BUSINESS_CLIENT', 'CLIENT', 'SAAS_CLIENT'].includes(roleName)) {
+    } else if (['BUSINESS_CLIENT', 'CLIENT'].includes(roleName)) {
       let resolvedClientId = req.user.clientId;
       if (!resolvedClientId) {
         const clientRec = await prisma.client.findFirst({
