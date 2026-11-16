@@ -10,7 +10,17 @@ export const createUser = async (req, res, next) => {
   try {
     const data = req.body;
     // ensure tenant isolation
-    data.tenantId = req.user.tenantId || data.tenantId || 1;
+    let resolvedTenantId = req.user.tenantId || data.tenantId || 1;
+    if (data.company_id || data.companyId || data.clientId) {
+      const cId = Number(data.company_id || data.companyId || data.clientId);
+      if (cId && !isNaN(cId)) {
+        const clientRec = await prisma.client.findUnique({ where: { id: cId } });
+        if (clientRec && clientRec.tenantId && clientRec.tenantId !== 1) {
+          resolvedTenantId = clientRec.tenantId;
+        }
+      }
+    }
+    data.tenantId = resolvedTenantId;
 
     if (data.birthday) {
       const birthStr = String(data.birthday).trim().split('T')[0];

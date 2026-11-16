@@ -20,26 +20,47 @@ export const findItemBySku = async (sku, tenantId) => {
   });
 };
 
-export const findAllItems = async (tenantId, query) => {
+export const findAllItems = async (tenantId, query = {}) => {
   const { page = 1, limit = 10, search = '', status, categoryId, clientId, resolvedClientId, userTenantId } = query;
   const limitVal = (limit != null && !isNaN(Number(limit))) ? Number(limit) : 10;
   const skip = (page - 1) * limitVal;
 
   let where = {};
 
-  if (resolvedClientId || userTenantId) {
-    if (query.inventoryType === 'MARKETPLACE' || query.type === 'marketplace' || query.scope === 'marketplace') {
-      where = { inventoryType: 'MARKETPLACE' };
-    } else {
-      where = {
-        OR: [
-          ...(resolvedClientId ? [{ clientId: Number(resolvedClientId) }] : []),
-          ...(userTenantId ? [{ tenantId: Number(userTenantId) }] : [])
-        ]
-      };
+  const effectiveTenantId = (tenantId !== null && tenantId !== undefined)
+    ? (Array.isArray(tenantId) ? tenantId.map(Number) : Number(tenantId))
+    : (userTenantId ? Number(userTenantId) : null);
+
+  if (effectiveTenantId !== null && !isNaN(effectiveTenantId)) {
+    where.tenantId = Array.isArray(effectiveTenantId) ? { in: effectiveTenantId } : effectiveTenantId;
+  }
+
+  if (resolvedClientId || clientId) {
+    const targetClientId = Number(resolvedClientId || clientId);
+    if (!isNaN(targetClientId)) {
+      if (where.tenantId !== undefined) {
+        where.AND = [
+          { tenantId: where.tenantId },
+          {
+            OR: [
+              { clientId: targetClientId },
+              { clientId: null }
+            ]
+          }
+        ];
+        delete where.tenantId;
+      } else {
+        where.clientId = targetClientId;
+      }
     }
-  } else if (tenantId !== null && tenantId !== undefined) {
-    where.tenantId = Array.isArray(tenantId) ? { in: tenantId.map(Number) } : Number(tenantId);
+  }
+
+  const invType = query.inventoryType || query.type;
+  if (invType && invType !== 'all') {
+    const isSaaS = (effectiveTenantId !== null && !Array.isArray(effectiveTenantId) && Number(effectiveTenantId) > 1);
+    if (!isSaaS) {
+      where.inventoryType = { equals: invType, mode: 'insensitive' };
+    }
   }
 
   if (search) {

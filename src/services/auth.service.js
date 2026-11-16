@@ -53,6 +53,15 @@ export const loginUser = async (email, password, tenantId, ipAddress, userAgent)
     if (client) {
       user.clientId = client.id;
       user.company_id = client.id;
+      if (client.tenantId && client.tenantId !== 1 && (!user.tenantId || user.tenantId === 1)) {
+        user.tenantId = client.tenantId;
+        try {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { tenantId: client.tenantId }
+          });
+        } catch (_) {}
+      }
     }
   }
 
@@ -199,6 +208,15 @@ export const getProfile = async (userId) => {
     if (client) {
       user.clientId = client.id;
       user.company_id = client.id;
+      if (client.tenantId && client.tenantId !== 1 && (!user.tenantId || user.tenantId === 1)) {
+        user.tenantId = client.tenantId;
+        try {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { tenantId: client.tenantId }
+          });
+        } catch (_) {}
+      }
     }
   }
 

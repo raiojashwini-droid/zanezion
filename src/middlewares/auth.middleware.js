@@ -111,6 +111,9 @@ export const authenticate = async (req, res, next) => {
     if (client) {
       user.clientId = client.id;
       user.company_id = client.id;
+      if (client.tenantId && client.tenantId !== 1 && (!user.tenantId || user.tenantId === 1)) {
+        user.tenantId = client.tenantId;
+      }
     }
 
     userCache.set(decoded.id, { user, timestamp: Date.now() });

@@ -86,27 +86,41 @@ export const getItems = async (req, res, next) => {
     }
 
     // For Business Clients, Customers, SaaS Tenants:
+    let effectiveTenantId = userTenant;
     let resolvedClientId = req.user.clientId;
-    if (!resolvedClientId) {
-      const clientRec = await prisma.client.findFirst({
-        where: {
-          OR: [
-            { email: req.user.email },
-            ...(req.user.tenantId ? [{ tenantId: req.user.tenantId }] : []),
-            { companyName: req.user.name || '' }
-          ]
-        }
+
+    if (req.user?.email) {
+      const saasClientRec = await prisma.client.findFirst({
+        where: { email: req.user.email, tenantId: { not: 1 } }
       });
-      if (clientRec) resolvedClientId = clientRec.id;
+      if (saasClientRec?.tenantId) {
+        effectiveTenantId = saasClientRec.tenantId;
+        resolvedClientId = saasClientRec.id;
+      } else if (!resolvedClientId) {
+        const clientRec = await prisma.client.findFirst({
+          where: {
+            OR: [
+              { email: req.user.email },
+              { companyName: req.user.name || '' }
+            ]
+          }
+        });
+        if (clientRec) {
+          resolvedClientId = clientRec.id;
+          if (clientRec.tenantId && clientRec.tenantId !== 1) {
+            effectiveTenantId = clientRec.tenantId;
+          }
+        }
+      }
     }
 
     const clientQuery = {
       ...req.query,
       resolvedClientId: resolvedClientId ? Number(resolvedClientId) : undefined,
-      userTenantId: req.user.tenantId ? Number(req.user.tenantId) : undefined
+      userTenantId: effectiveTenantId
     };
 
-    const result = await itemService.getItems(null, clientQuery);
+    const result = await itemService.getItems(effectiveTenantId, clientQuery);
     return sendResponse(res, 200, 'Items fetched successfully', result);
   } catch (error) {
     next(error);

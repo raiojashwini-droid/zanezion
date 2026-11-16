@@ -52,8 +52,8 @@ export const getInventory = async (req, res, next) => {
     const isClient = checkIsClient(req.user);
     const isSaaSTenant = req.user.tenantId && Number(req.user.tenantId) !== 1;
     const tenantId = isSuperAdmin ? null :
-                     isClient ? [1, req.user.tenantId].filter(t => t !== null && t !== undefined).map(Number) :
                      isSaaSTenant ? Number(req.user.tenantId) :
+                     isClient ? (req.user.tenantId || 1) :
                      (req.user.tenantId || 1);
 
     const items = await prisma.item.findMany({
