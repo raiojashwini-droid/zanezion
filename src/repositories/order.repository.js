@@ -226,15 +226,12 @@ export const findAllOrders = async (tenantId, query) => {
       ...(tenantId === 1
         ? {
             tenantId: 1,
-            OR: [
-              { client: { is: { tenantId: 1 } } },
-              { clientId: null }
-            ]
+            client: { tenantId: 1 }
           }
         : {
             OR: [
               { tenantId },
-              { client: { is: { tenantId } } }
+              { client: { tenantId } }
             ]
           }
       )
@@ -243,11 +240,7 @@ export const findAllOrders = async (tenantId, query) => {
     ...(status && { status }),
     ...(!isCustomerFilter && clientId && { clientId: Number(clientId) }),
     ...(orderType && {
-      OR: [
-        { orderType: orderType },
-        { orderType: String(orderType).toLowerCase() },
-        { orderType: String(orderType).toUpperCase() }
-      ]
+      orderType: { in: [orderType, String(orderType).toLowerCase(), String(orderType).toUpperCase()] }
     })
   };
 
