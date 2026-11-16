@@ -17,13 +17,23 @@ export const createOrder = async (req, res, next) => {
     const userTenant = req.user?.tenantId ? Number(req.user.tenantId) : 1;
     const isCustomerRole = ['INDIVIDUAL_CLIENT', 'CUSTOMER'].includes(roleName);
     const isBusinessClient = req.user.role?.name === 'BUSINESS_CLIENT' || req.user.role?.name === 'CLIENT';
-    const tenantIdToUse = (userTenant !== 1)
+    let tenantIdToUse = (userTenant !== 1)
       ? userTenant
       : (req.body.tenantId
           ? Number(req.body.tenantId)
           : (incomingCompanyId && !isNaN(Number(incomingCompanyId)) && Number(incomingCompanyId) > 0
               ? Number(incomingCompanyId)
               : resolveTenantId(req)));
+
+    // Fallback: If tenantIdToUse resolved to 1 but customer's client record belongs to a SaaS tenant
+    if (tenantIdToUse === 1 && req.user.email) {
+      const saasClientRec = await prisma.client.findFirst({
+        where: { email: req.user.email, tenantId: { not: 1 } }
+      });
+      if (saasClientRec?.tenantId) {
+        tenantIdToUse = saasClientRec.tenantId;
+      }
+    }
     req.body.tenantId = tenantIdToUse;
 
     // Try to parse clientId from payload
@@ -134,12 +144,11 @@ export const getOrders = async (req, res, next) => {
     const isClientRole = ['BUSINESS_CLIENT', 'CLIENT'].includes(roleName);
     const isChauffeurQuery = String(req.query.orderType || '').toUpperCase() === 'CHAUFFEUR';
 
-    // For Chauffeur orders:
-    // - HQ Staff (tenant 1): only see Tenant 1 Chauffeur orders by default (unless explicitly drilling down with ?tenantId=)
-    // - SaaS Admin / SaaS users (tenant > 1): only see their own tenant's Chauffeur orders
-    // For general orders: HQ Staff has central visibility unless ?tenantId= is specified
+    // Multi-tenant isolation:
+    // - HQ Staff (tenant 1): strictly see Tenant 1 HQ orders by default, UNLESS explicitly drilling down with ?tenantId=X or ?allTenants=true
+    // - SaaS Admin / SaaS users (tenant > 1): only see their own tenant's orders
     const tenantIdToFilter = isHQStaff
-      ? (req.query.tenantId ? Number(req.query.tenantId) : (isChauffeurQuery ? 1 : null))
+      ? (req.query.tenantId ? Number(req.query.tenantId) : (req.query.allTenants === 'true' ? null : 1))
       : resolveTenantId(req);
 
     if (isCustomerRole) {

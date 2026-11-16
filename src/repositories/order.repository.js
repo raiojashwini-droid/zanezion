@@ -222,7 +222,24 @@ export const findAllOrders = async (tenantId, query) => {
 
   const isCustomerFilter = !!(user_id || customer_email || customer_name);
   const where = {
-    ...(tenantId !== null && tenantId !== undefined && { tenantId }),
+    ...(tenantId !== null && tenantId !== undefined && {
+      ...(tenantId === 1
+        ? {
+            tenantId: 1,
+            OR: [
+              { client: { tenantId: 1 } },
+              { client: null },
+              { clientId: null }
+            ]
+          }
+        : {
+            OR: [
+              { tenantId },
+              { client: { tenantId } }
+            ]
+          }
+      )
+    }),
     ...(search && { orderNumber: { contains: search } }),
     ...(status && { status }),
     ...(!isCustomerFilter && clientId && { clientId: Number(clientId) }),
@@ -247,7 +264,7 @@ export const findAllOrders = async (tenantId, query) => {
     orderBy: { createdAt: 'desc' },
     include: {
       items: { include: { item: true } },
-      client: { select: { id: true, companyName: true, clientCode: true, contactPerson: true, email: true, plan: true, clientType: true, status: true } },
+      client: { select: { id: true, tenantId: true, companyName: true, clientCode: true, contactPerson: true, email: true, plan: true, clientType: true, status: true } },
       deliveries: {
         include: {
           assignee: { select: { firstName: true, lastName: true, userId: true } }
