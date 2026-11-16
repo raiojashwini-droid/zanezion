@@ -139,17 +139,21 @@ export const getOrders = async (req, res, next) => {
     const rawRole = typeof req.user?.role === 'string' ? req.user.role : (req.user?.role?.name || req.user?.roleName || '');
     const roleName = String(rawRole).toUpperCase();
     const userTenant = req.user?.tenantId ? Number(req.user.tenantId) : 1;
+    const isSuperAdmin = ['SUPER_ADMIN', 'SUPERADMIN'].includes(roleName);
     const isHQStaff = ['SUPER_ADMIN', 'SUPERADMIN', 'ADMIN', 'OPERATIONS', 'LOGISTICS', 'CONCIERGE', 'STAFF', 'PROCUREMENT', 'INVENTORY'].includes(roleName) && userTenant === 1;
     const isCustomerRole = ['INDIVIDUAL_CLIENT', 'CUSTOMER'].includes(roleName);
     const isClientRole = ['BUSINESS_CLIENT', 'CLIENT'].includes(roleName);
     const isChauffeurQuery = String(req.query.orderType || '').toUpperCase() === 'CHAUFFEUR';
 
     // Multi-tenant isolation:
-    // - HQ Staff (tenant 1): strictly see Tenant 1 HQ orders by default, UNLESS explicitly drilling down with ?tenantId=X or ?allTenants=true
-    // - SaaS Admin / SaaS users (tenant > 1): only see their own tenant's orders
-    const tenantIdToFilter = isHQStaff
-      ? (req.query.tenantId ? Number(req.query.tenantId) : (req.query.allTenants === 'true' ? null : 1))
-      : resolveTenantId(req);
+    // - Only Super Admin can query cross-tenant with ?allTenants=true
+    // - HQ Staff (tenant 1): strictly see Tenant 1 HQ orders by default, UNLESS explicitly drilling down with ?tenantId=X
+    // - SaaS Admin / SaaS users (tenant > 1): strictly see their own tenant's orders
+    const tenantIdToFilter = (isSuperAdmin && req.query.allTenants === 'true')
+      ? null
+      : (isHQStaff
+          ? (req.query.tenantId ? Number(req.query.tenantId) : 1)
+          : resolveTenantId(req));
 
     if (isCustomerRole) {
       let resolvedClientId = req.user.clientId;
