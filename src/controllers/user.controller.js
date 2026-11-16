@@ -1,0 +1,398 @@
+import * as userService from '../services/user.service.js';
+import { sendResponse } from '../utils/response.js';
+import cloudinary from '../config/cloudinary.js';
+import { resolveTenantId } from '../utils/tenantResolver.js';
+import { logAudit } from '../utils/audit.js';
+import fs from 'fs';
+import path from 'path';
+
+export const createUser = async (req, res, next) => {
+  try {
+    const data = req.body;
+    // ensure tenant isolation
+    data.tenantId = req.user.tenantId || data.tenantId || 1;
+
+    if (data.birthday) {
+      const birthStr = String(data.birthday).trim().split('T')[0];
+      const parts = birthStr.split('-').map(Number);
+      const birthDate = (parts.length === 3 && !parts.some(n => Number.isNaN(n)))
+        ? new Date(parts[0], parts[1] - 1, parts[2])
+        : new Date(data.birthday);
+
+      if (isNaN(birthDate.getTime())) {
+        return res.status(400).json({ success: false, message: 'Invalid birthday format' });
+      }
+      const today = new Date();
+      if (birthDate > today) {
+        return res.status(400).json({ success: false, message: 'Birthday cannot be in the future' });
+      }
+      let age = today.getFullYear() - birthDate.getFullYear();
+      const m = today.getMonth() - birthDate.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+        age--;
+      }
+      if (age < 18) {
+        return res.status(400).json({ success: false, message: 'User must be at least 18 years old' });
+      }
+    }
+
+    const vQuota = data.vacationBalance !== undefined ? Number(data.vacationBalance) : 80;
+    const baseBanking = (typeof data.bankingInfo === 'object' && data.bankingInfo) ? data.bankingInfo : {};
+
+    // robust payload prep for prisma
+    const payload = {
+      name: data.name,
+      email: data.email,
+      password: data.password,
+      roleId: Number(data.roleId),
+      phone: data.phone || null,
+      tenantId: data.tenantId,
+      status: data.status || 'Active',
+      vacationBalance: vQuota,
+      birthday: data.birthday ? new Date(data.birthday) : null,
+      nibNumber: data.nibNumber || null,
+      employmentStatus: data.employmentStatus || 'Full Time',
+      hasPassport: !!data.hasPassport,
+      hasLicense: !!data.hasLicense,
+      hasNIB: !!data.hasNIB,
+      hasResume: !!data.hasResume,
+      bankingInfo: {
+        ...baseBanking,
+        vacationQuota: vQuota
+      }
+    };
+
+    const user = await userService.createUser(
+      payload,
+      req.user.id,
+      req.ip,
+      req.headers['user-agent']
+    );
+
+    sendResponse(res, 201, 'User created successfully', user);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getUsers = async (req, res, next) => {
+  try {
+    const tenantIdToFilter = resolveTenantId(req);
+
+    const result = await userService.getUsers(tenantIdToFilter, req.query);
+    sendResponse(res, 200, 'Users fetched successfully', result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getCustomers = async (req, res, next) => {
+  try {
+    const rawRole = typeof req.user?.role === 'string' ? req.user.role : (req.user?.role?.name || req.user?.roleName || '');
+    const roleName = String(rawRole).toUpperCase();
+    const userTenant = req.user?.tenantId ? Number(req.user.tenantId) : 1;
+    const isHQStaff = ['SUPER_ADMIN', 'SUPERADMIN', 'CONCIERGE', 'OPERATIONS', 'PROCUREMENT', 'LOGISTICS', 'STAFF'].includes(roleName) && userTenant === 1;
+
+    let tenantIdToFilter = resolveTenantId(req);
+    if (isHQStaff && (req.query.include_all || req.query.include_client_role)) {
+      tenantIdToFilter = null;
+    }
+
+    const query = { limit: 1000, ...req.query };
+    if (!req.query.include_all && !req.query.include_client_role) {
+      query.roleName = 'BUSINESS_CLIENT';
+    }
+
+    if (['BUSINESS_CLIENT', 'INDIVIDUAL_CLIENT'].includes(roleName)) {
+      query.clientId = req.user.clientId;
+    }
+
+    const result = await userService.getUsers(tenantIdToFilter, query);
+
+    sendResponse(res, 200, 'Customers fetched successfully', result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getUserById = async (req, res, next) => {
+  try {
+    const tenantIdToFilter = resolveTenantId(req);
+    const targetId = Number(req.params.id);
+
+    const user = await userService.getUserById(targetId, tenantIdToFilter);
+
+    // Enforce server-side sensitive field protection on individual user retrieval
+    const isOwner = req.user && req.user.id === targetId;
+    const requesterRole = String(req.user?.role?.name || '').toUpperCase();
+    const isSuperAdmin = requesterRole === 'SUPER_ADMIN' || requesterRole === 'SUPERADMIN';
+    const isTenantAdminOrHR = ['ADMIN', 'HR', 'HR_MANAGER'].includes(requesterRole) &&
+      (req.user?.tenantId === user.tenantId || req.user?.tenantId === 1);
+
+    if (!isOwner && !isSuperAdmin && !isTenantAdminOrHR) {
+      delete user.bankingInfo;
+      delete user.nibNumber;
+      delete user.passportUrl;
+      delete user.licenseUrl;
+      delete user.nibUrl;
+      delete user.resumeUrl;
+      delete user.certsUrl;
+    }
+
+    sendResponse(res, 200, 'User fetched successfully', user);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getUserBankingInfo = async (req, res, next) => {
+  try {
+    const targetId = Number(req.params.id);
+    const tenantIdToFilter = resolveTenantId(req);
+
+    const user = await userService.getUserById(targetId, tenantIdToFilter);
+    if (!user) {
+      return sendResponse(res, 404, 'User not found');
+    }
+
+    const isOwner = req.user && req.user.id === targetId;
+    const requesterRole = String(req.user?.role?.name || '').toUpperCase();
+    const isSuperAdmin = requesterRole === 'SUPER_ADMIN' || requesterRole === 'SUPERADMIN';
+    const isTenantAdminOrHR = ['ADMIN', 'HR', 'HR_MANAGER'].includes(requesterRole) &&
+      (req.user?.tenantId === user.tenantId || req.user?.tenantId === 1);
+
+    if (!isOwner && !isSuperAdmin && !isTenantAdminOrHR) {
+      return sendResponse(res, 403, 'Forbidden: You do not have permission to view sensitive banking data');
+    }
+
+    await logAudit({
+      module: 'USERS',
+      action: 'VIEW_SENSITIVE_DATA',
+      description: `Accessed banking information for user ID ${targetId}`,
+      performedBy: req.user.id
+    });
+
+    sendResponse(res, 200, 'Banking information retrieved successfully', {
+      userId: user.id,
+      bankingInfo: user.bankingInfo || null
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateUser = async (req, res, next) => {
+  try {
+    const tenantIdToFilter = resolveTenantId(req);
+
+    const isCustomer = ['BUSINESS_CLIENT', 'INDIVIDUAL_CLIENT', 'client', 'saas_client', 'customer'].includes(req.user.role?.name);
+
+    if (isCustomer && Number(req.params.id) !== req.user.id) {
+      return sendResponse(res, 403, 'Forbidden: You can only update your own profile');
+    }
+
+    const data = req.body;
+    const payload = {};
+
+    // Only admins can update these fields
+    if (!isCustomer) {
+      if (data.roleId !== undefined && data.roleId) payload.roleId = Number(data.roleId);
+      if (data.status !== undefined) payload.status = data.status;
+      if (data.vacationBalance !== undefined) {
+        const vQuota = Number(data.vacationBalance) || 0;
+        payload.vacationBalance = vQuota;
+        const baseBanking = (typeof data.bankingInfo === 'object' && data.bankingInfo) ? data.bankingInfo : {};
+        payload.bankingInfo = {
+          ...baseBanking,
+          vacationQuota: vQuota
+        };
+      }
+      if (data.employmentStatus !== undefined) payload.employmentStatus = data.employmentStatus || 'Full Time';
+    }
+
+    // Common fields
+    if (data.name !== undefined) payload.name = data.name;
+    if (data.email !== undefined) payload.email = data.email;
+    if (data.phone !== undefined) payload.phone = data.phone;
+    if (data.password !== undefined && data.password) payload.password = data.password;
+    if (data.birthday !== undefined) {
+      if (data.birthday) {
+        const birthStr = String(data.birthday).trim().split('T')[0];
+        const parts = birthStr.split('-').map(Number);
+        const birthDate = (parts.length === 3 && !parts.some(n => Number.isNaN(n)))
+          ? new Date(parts[0], parts[1] - 1, parts[2])
+          : new Date(data.birthday);
+
+        if (isNaN(birthDate.getTime())) {
+          return res.status(400).json({ success: false, message: 'Invalid birthday format' });
+        }
+        const today = new Date();
+        if (birthDate > today) {
+          return res.status(400).json({ success: false, message: 'Birthday cannot be in the future' });
+        }
+        let age = today.getFullYear() - birthDate.getFullYear();
+        const m = today.getMonth() - birthDate.getMonth();
+        if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+          age--;
+        }
+        if (age < 18) {
+          return res.status(400).json({ success: false, message: 'User must be at least 18 years old' });
+        }
+        payload.birthday = birthDate;
+      } else {
+        payload.birthday = null;
+      }
+    }
+    if (data.nibNumber !== undefined) payload.nibNumber = data.nibNumber || null;
+    if (data.hasPassport !== undefined) payload.hasPassport = !!data.hasPassport;
+    if (data.hasLicense !== undefined) payload.hasLicense = !!data.hasLicense;
+    if (data.hasNIB !== undefined) payload.hasNIB = !!data.hasNIB;
+    if (data.hasResume !== undefined) payload.hasResume = !!data.hasResume;
+    if (data.hasProfilePic !== undefined) payload.hasProfilePic = !!data.hasProfilePic;
+    if (data.hasCerts !== undefined) payload.hasCerts = !!data.hasCerts;
+    if (data.passportUrl !== undefined) payload.passportUrl = data.passportUrl || null;
+    if (data.licenseUrl !== undefined) payload.licenseUrl = data.licenseUrl || null;
+    if (data.nibUrl !== undefined) payload.nibUrl = data.nibUrl || null;
+    if (data.resumeUrl !== undefined) payload.resumeUrl = data.resumeUrl || null;
+    if (data.certsUrl !== undefined) payload.certsUrl = data.certsUrl || null;
+    if (data.bankingInfo !== undefined) {
+      payload.bankingInfo = {
+        ...(typeof data.bankingInfo === 'object' && data.bankingInfo ? data.bankingInfo : {}),
+        ...(payload.bankingInfo?.vacationQuota !== undefined ? { vacationQuota: payload.bankingInfo.vacationQuota } : {})
+      };
+    }
+    if (data.isSalaried !== undefined) payload.isSalaried = !!data.isSalaried;
+
+    // Concierge & Membership fields
+    if (data.plan !== undefined) payload.plan = data.plan;
+    if (data.is_upgraded !== undefined) payload.is_upgraded = Boolean(data.is_upgraded);
+    if (data.concierge_member !== undefined) payload.concierge_member = Boolean(data.concierge_member);
+    if (data.concierge_membership_since !== undefined) payload.concierge_membership_since = data.concierge_membership_since;
+
+    const updatedUser = await userService.updateUser(Number(req.params.id), payload, tenantIdToFilter, req.ip, req.headers['user-agent']);
+    
+    if (data.vacationBalance !== undefined) {
+      try {
+        const { recalculateUserVacationBalance } = await import('./leave.controller.js');
+        await recalculateUserVacationBalance(Number(req.params.id));
+      } catch (recErr) {
+        console.warn('Failed to recalculate balance after user update:', recErr);
+      }
+    }
+
+    sendResponse(res, 200, 'User updated successfully', updatedUser);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteUser = async (req, res, next) => {
+  try {
+    const tenantIdToFilter = resolveTenantId(req);
+
+    await userService.deleteUser(Number(req.params.id), tenantIdToFilter, req.ip, req.headers['user-agent']);
+    sendResponse(res, 200, 'User deleted successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const uploadDocument = async (req, res, next) => {
+  try {
+    const userId = Number(req.params.id);
+    const { type } = req.query;
+    if (!req.file) {
+      return sendResponse(res, 400, 'No file uploaded');
+    }
+
+    const isOwner = req.user && req.user.id === userId;
+    const requesterRole = String(req.user?.role?.name || '').toUpperCase();
+    const isSuperAdmin = requesterRole === 'SUPER_ADMIN' || requesterRole === 'SUPERADMIN';
+    const isTenantAdminOrHR = ['ADMIN', 'HR', 'HR_MANAGER', 'OPERATIONS', 'SAAS_CLIENT', 'SAAS_ADMIN', 'CLIENT', 'BUSINESS_CLIENT'].includes(requesterRole);
+
+    if (!isOwner && !isSuperAdmin && !isTenantAdminOrHR) {
+      return sendResponse(res, 403, 'Forbidden: You do not have permission to upload documents for another user');
+    }
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, tenantId: true }
+    });
+    if (!targetUser) {
+      return sendResponse(res, 404, 'User not found');
+    }
+    if (!isSuperAdmin && req.user.tenantId && req.user.tenantId !== 1 && targetUser.tenantId !== req.user.tenantId) {
+      return sendResponse(res, 403, 'Forbidden: Cross-tenant upload not allowed');
+    }
+
+    const documentTypes = {
+      passport: { key: 'hasPassport', urlKey: 'passportUrl', formats: ['pdf', 'jpg', 'jpeg', 'png'] },
+      license: { key: 'hasLicense', urlKey: 'licenseUrl', formats: ['pdf', 'jpg', 'jpeg', 'png'] },
+      nib: { key: 'hasNIB', urlKey: 'nibUrl', formats: ['pdf', 'jpg', 'jpeg', 'png'] },
+      resume: { key: 'hasResume', urlKey: 'resumeUrl', formats: ['pdf', 'doc', 'docx'] },
+      profilePic: { key: 'hasProfilePic', urlKey: 'avatar', formats: ['jpg', 'jpeg', 'png', 'webp'] },
+      certs: { key: 'hasCerts', urlKey: 'certsUrl', formats: ['pdf', 'jpg', 'jpeg', 'png'] }
+    };
+
+    const docConfig = documentTypes[type];
+    if (!docConfig) {
+      return sendResponse(res, 400, 'Invalid document type');
+    }
+
+    const fileExt = req.file.originalname.split('.').pop().toLowerCase();
+    if (!docConfig.formats.includes(fileExt)) {
+      return sendResponse(res, 400, `Invalid file format. Allowed formats for ${type}: ${docConfig.formats.join(', ')}`);
+    }
+
+    let secureUrl = '';
+
+    // Attempt Cloudinary stream upload if credentials are valid
+    if (process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_KEY !== 'dummy' && cloudinary?.uploader) {
+      try {
+        const baseFolder = process.env.CLOUDINARY_FOLDER || 'zanezion';
+        const uploadResult = await new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(
+            { folder: `${baseFolder}/institutional_vault`, resource_type: 'auto' },
+            (error, result) => {
+              if (error) return reject(error);
+              resolve(result);
+            }
+          );
+          stream.end(req.file.buffer);
+        });
+        secureUrl = uploadResult.secure_url;
+      } catch (cErr) {
+        console.warn('Cloudinary upload warning, falling back to local file storage:', cErr.message);
+      }
+    }
+
+    // Disk storage fallback if Cloudinary not available or failed
+    if (!secureUrl) {
+      const uploadsDir = path.join(process.cwd(), 'uploads');
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+      const safeExt = fileExt || 'bin';
+      const filename = `${type}_user_${userId}_${Date.now()}.${safeExt}`;
+      const filePath = path.join(uploadsDir, filename);
+      fs.writeFileSync(filePath, req.file.buffer);
+      secureUrl = `/uploads/${filename}`;
+    }
+
+    const tenantIdToFilter = isSuperAdmin ? null : (req.user?.tenantId || 1);
+
+    const payload = {
+      [docConfig.key]: true,
+      [docConfig.urlKey]: secureUrl
+    };
+
+    const updatedUser = await userService.updateUser(userId, payload, tenantIdToFilter, req.ip, req.headers['user-agent']);
+    sendResponse(res, 200, 'Document uploaded successfully', {
+      ...updatedUser,
+      url: secureUrl,
+      [docConfig.urlKey]: secureUrl
+    });
+  } catch (error) {
+    next(error);
+  }
+};
