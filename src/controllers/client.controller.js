@@ -83,8 +83,8 @@ export const getClients = async (req, res, next) => {
     const roleName = String(rawRole).toUpperCase();
     const userTenant = req.user?.tenantId ? Number(req.user.tenantId) : 1;
     const isHQStaff = [
-      'SUPER_ADMIN', 'SUPERADMIN', 'ADMIN', 'INVENTORY', 'INVENTORY_MANAGER', 'OPERATIONS', 'LOGISTICS', 'PROCUREMENT', 'CONCIERGE', 'STAFF', 'SECURITY'
-    ].includes(roleName) || req.user?.roleId === 1 || req.user?.roleId === 2 || userTenant === 1;
+      'SUPER_ADMIN', 'SUPERADMIN'
+    ].includes(roleName) || req.user?.roleId === 1;
 
     let tenantIdToFilter = resolveTenantId(req);
     if (isHQStaff) {
@@ -93,9 +93,13 @@ export const getClients = async (req, res, next) => {
       } else {
         tenantIdToFilter = null; // HQ Staff can view across all tenants if no specific tenant requested
       }
+    } else {
+      // For any tenant user, including SAAS_CLIENT, BUSINESS_CLIENT, ADMIN, etc., strictly lock to their own tenant
+      tenantIdToFilter = req.user?.tenantId || 1;
     }
 
-    if (['INDIVIDUAL_CLIENT', 'CUSTOMER', 'CLIENT', 'SAAS_CLIENT'].includes(roleName)) {
+    // For end-consumer client roles only (CUSTOMER / INDIVIDUAL_CLIENT), restrict to their own single record
+    if (['INDIVIDUAL_CLIENT', 'CUSTOMER'].includes(roleName)) {
       let resolvedClientId = req.user.clientId;
       if (!resolvedClientId) {
         const clientRec = await prisma.client.findFirst({
@@ -110,7 +114,6 @@ export const getClients = async (req, res, next) => {
       }
       if (resolvedClientId) {
         req.query.id = resolvedClientId;
-        tenantIdToFilter = null;
       }
     }
 

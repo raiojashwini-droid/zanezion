@@ -20,12 +20,13 @@ export const findClientByCode = async (clientCode, tenantId) => {
 };
 
 export const findAllClients = async (tenantId, query) => {
-  const { page = 1, limit, search = '', status, clientType } = query;
+  const { page = 1, limit, search = '', status, clientType, id } = query;
   const limitVal = (limit != null && !isNaN(Number(limit))) ? Number(limit) : 1000;
   const skip = (page - 1) * limitVal;
 
   const where = {
     ...(tenantId !== null && { tenantId }),
+    ...(id && { id: Number(id) }),
     ...(search && {
       OR: [
         { companyName: { contains: search } },
