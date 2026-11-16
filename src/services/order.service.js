@@ -563,7 +563,7 @@ export const updateOrderStatus = async (id, status, tenantId, performerId, remar
     } else if (['assigned', 'accepted'].includes(normStatus)) {
       await tx.delivery.updateMany({
         where: { orderId: realOrderId },
-        data: { status: 'assigned' }
+        data: { status: normStatus === 'accepted' ? 'accepted' : 'assigned' }
       }).catch(() => null);
       await tx.mission.updateMany({
         where: {
@@ -1080,7 +1080,7 @@ export const updateOrder = async (id, data, tenantId, performerId) => {
           if (data.status) {
             targetDelStatus = ['completed', 'delivered'].includes(newStatus)
               ? 'delivered'
-              : (newStatus === 'en_route' ? 'en_route' : (['in_transit', 'en_route'].includes(newStatus) ? 'in_transit' : 'assigned'));
+              : (newStatus === 'en_route' ? 'en_route' : (['in_transit', 'en_route'].includes(newStatus) ? 'in_transit' : (newStatus === 'accepted' ? 'accepted' : 'assigned')));
           } else if (hasDriverOrVehicle && ['pending', 'pending_review', 'created', 'draft'].includes(String(existingDelivery.status || '').toLowerCase())) {
             targetDelStatus = 'assigned';
           }
