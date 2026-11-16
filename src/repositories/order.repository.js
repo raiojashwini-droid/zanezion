@@ -226,12 +226,15 @@ export const findAllOrders = async (tenantId, query) => {
       ...(tenantId === 1
         ? {
             tenantId: 1,
-            client: { tenantId: 1 }
+            OR: [
+              { client: { is: { tenantId: 1 } } },
+              { clientId: null }
+            ]
           }
         : {
             OR: [
               { tenantId },
-              { client: { tenantId } }
+              { client: { is: { tenantId } } }
             ]
           }
       )
