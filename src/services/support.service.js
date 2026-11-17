@@ -67,8 +67,8 @@ export const createTicket = async (data, performerId, tenantId) => {
 
   const payload = {
     ticketId,
-    title: data.subject || data.title || data.issue || 'Support Request',
-    description: data.description || '',
+    title: String(data.subject || data.title || data.issue || 'Support Request').slice(0, 180),
+    description: String(data.description || data.subject || '').slice(0, 180),
     priority: data.priority || 'Medium',
     status: data.status || 'Open',
     category: data.category || 'General',
