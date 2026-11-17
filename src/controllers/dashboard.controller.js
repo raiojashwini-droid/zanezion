@@ -171,9 +171,34 @@ export const getDashboardStats = async (req, res, next) => {
       return sum + ((la.quantity || 0) * (la.item?.price || 0));
     }, 0);
 
-    // Aggregate invoices
+    // Aggregate invoices and calculate net revenue after approved dispute refunds
     const unpaidInvoices = invoices.filter(inv => inv.status !== 'Paid' && inv.status !== 'paid').length;
-    const totalRevenue = invoices.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0);
+    const grossRevenue = invoices.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0);
+
+    let totalDisputeRefunds = 0;
+    try {
+      const resolvedTickets = await prisma.supportTicket.findMany({
+        where: {
+          ...filter,
+          status: { in: ['Resolved', 'resolved'] }
+        },
+        select: { messages: true }
+      });
+      for (const t of resolvedTickets) {
+        let msgs = t.messages;
+        if (typeof msgs === 'string') {
+          try { msgs = JSON.parse(msgs); } catch (_) { msgs = []; }
+        }
+        if (Array.isArray(msgs)) {
+          const disputeMeta = msgs.find(m => m && m.type === 'dispute_meta' && m.dispute_status === 'accepted');
+          if (disputeMeta && disputeMeta.refund_amount) {
+            totalDisputeRefunds += Number(disputeMeta.refund_amount) || 0;
+          }
+        }
+      }
+    } catch (_) {}
+
+    const totalRevenue = Math.max(0, grossRevenue - totalDisputeRefunds);
     
     // Revenue Trends
     const relevantRevenue = invoices

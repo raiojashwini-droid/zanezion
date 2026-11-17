@@ -52,6 +52,19 @@ export const createTicket = async (data, performerId, tenantId) => {
     existing = await supportRepository.findTicketById(ticketId, tenantId);
   }
 
+  let ticketMessages = data.messages ? JSON.parse(JSON.stringify(data.messages)) : [];
+  if (!Array.isArray(ticketMessages)) ticketMessages = [];
+  if (data.dispute_data || data.dispute_status || data.refund_amount || data.order_id) {
+    ticketMessages.push({
+      type: 'dispute_meta',
+      dispute_status: data.dispute_status || 'pending',
+      refund_amount: Number(data.refund_amount) || 0,
+      dispute_data: data.dispute_data || null,
+      order_id: data.order_id || data.dispute_data?.orderId || null,
+      timestamp: new Date().toISOString()
+    });
+  }
+
   const payload = {
     ticketId,
     title: data.subject || data.title || data.issue || 'Support Request',
@@ -69,13 +82,34 @@ export const createTicket = async (data, performerId, tenantId) => {
     createdById: data.created_by ? Number(data.created_by) : (data.createdById ? Number(data.createdById) : null),
     createdByEmail: data.createdByEmail || null,
     createdByName: data.createdByName || null,
-    messages: await sanitizeAndUploadMessages(data.messages ? JSON.parse(JSON.stringify(data.messages)) : []),
+    messages: await sanitizeAndUploadMessages(ticketMessages),
     tenantId
   };
 
   const ticket = await supportRepository.createTicket(payload);
   await logAudit({ module: 'SUPPORT', action: 'CREATE', description: `Logged ticket ${ticket.ticketId}`, newValue: ticket, performedBy: performerId });
-  return { ...ticket, id: ticket.ticketId, ticketId: ticket.ticketId, db_id: ticket.id };
+  return mapTicketWithDispute(ticket);
+};
+
+const mapTicketWithDispute = (ticket) => {
+  if (!ticket) return null;
+  let parsed = ticket.messages;
+  if (typeof parsed === 'string') {
+    try { parsed = JSON.parse(parsed); } catch (_) { parsed = []; }
+  }
+  const meta = Array.isArray(parsed) ? parsed.find(m => m && m.type === 'dispute_meta') : null;
+  const cleanMessages = Array.isArray(parsed) ? parsed.filter(m => m && m.type !== 'dispute_meta') : [];
+  return {
+    ...ticket,
+    id: ticket.ticketId,
+    ticketId: ticket.ticketId,
+    db_id: ticket.id,
+    dispute_status: meta?.dispute_status || 'none',
+    refund_amount: meta?.refund_amount || 0,
+    dispute_data: meta?.dispute_data || null,
+    order_id: meta?.order_id || null,
+    messages: cleanMessages
+  };
 };
 
 export const getTickets = async (tenantId, user) => {
@@ -92,10 +126,10 @@ export const getTickets = async (tenantId, user) => {
     const myClientId = user?.clientId;
     return tickets
       .filter(t => (myUserId && t.createdById === myUserId) || (myEmail && t.createdByEmail?.toLowerCase().trim() === myEmail) || (myClientId && t.clientId === myClientId))
-      .map(t => ({ ...t, id: t.ticketId, ticketId: t.ticketId, db_id: t.id }));
+      .map(mapTicketWithDispute);
   }
 
-  return tickets.map(t => ({ ...t, id: t.ticketId, ticketId: t.ticketId, db_id: t.id }));
+  return tickets.map(mapTicketWithDispute);
 };
 
 export const getTicketById = async (id, tenantId, user) => {
@@ -120,18 +154,7 @@ export const getTicketById = async (id, tenantId, user) => {
     }
   }
 
-  let parsedMessages = ticket.messages;
-  if (typeof parsedMessages === 'string') {
-    try { parsedMessages = JSON.parse(parsedMessages); } catch (_) { parsedMessages = []; }
-  }
-
-  return {
-    ...ticket,
-    id: ticket.ticketId,
-    ticketId: ticket.ticketId,
-    db_id: ticket.id,
-    messages: parsedMessages
-  };
+  return mapTicketWithDispute(ticket);
 };
 
 export const updateTicket = async (id, data, tenantId, performerId) => {
@@ -143,6 +166,35 @@ export const updateTicket = async (id, data, tenantId, performerId) => {
   let parsedMessages = rawMessages;
   if (typeof rawMessages === 'string') {
     try { parsedMessages = JSON.parse(rawMessages); } catch (_) { parsedMessages = []; }
+  }
+  if (!Array.isArray(parsedMessages)) parsedMessages = [];
+
+  // Update or insert dispute_meta inside messages
+  let existingMeta = null;
+  if (Array.isArray(existing.messages)) {
+    existingMeta = existing.messages.find(m => m && m.type === 'dispute_meta');
+  } else if (typeof existing.messages === 'string') {
+    try {
+      const eParsed = JSON.parse(existing.messages);
+      if (Array.isArray(eParsed)) existingMeta = eParsed.find(m => m && m.type === 'dispute_meta');
+    } catch (_) {}
+  }
+
+  if (data.dispute_status !== undefined || data.refund_amount !== undefined || data.dispute_data !== undefined || data.order_id !== undefined || existingMeta) {
+    const metaIdx = parsedMessages.findIndex(m => m && m.type === 'dispute_meta');
+    const updatedMeta = {
+      type: 'dispute_meta',
+      dispute_status: data.dispute_status !== undefined ? data.dispute_status : (existingMeta?.dispute_status || 'none'),
+      refund_amount: data.refund_amount !== undefined ? Number(data.refund_amount) : (existingMeta?.refund_amount || 0),
+      dispute_data: data.dispute_data !== undefined ? data.dispute_data : (existingMeta?.dispute_data || null),
+      order_id: data.order_id !== undefined ? data.order_id : (existingMeta?.order_id || null),
+      updatedAt: new Date().toISOString()
+    };
+    if (metaIdx >= 0) {
+      parsedMessages[metaIdx] = updatedMeta;
+    } else {
+      parsedMessages.push(updatedMeta);
+    }
   }
 
   const payload = {
@@ -156,7 +208,7 @@ export const updateTicket = async (id, data, tenantId, performerId) => {
 
   const updated = await supportRepository.updateTicket(id, null, payload);
   await logAudit({ module: 'SUPPORT', action: 'UPDATE', description: `Updated ticket ${id}`, oldValue: existing, newValue: updated, performedBy: performerId });
-  return { ...updated, id: updated.ticketId, ticketId: updated.ticketId, db_id: updated.id };
+  return mapTicketWithDispute(updated);
 };
 
 export const deleteTicket = async (id, tenantId, performerId) => {
