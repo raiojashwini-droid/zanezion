@@ -49,17 +49,17 @@ export const resolveTenantIdForSaasManagement = (req) => {
 export const resolveTenantIdForOperations = (req) => {
   const roleName = String(typeof req.user?.role === 'string' ? req.user.role : (req.user?.role?.name || '')).toUpperCase();
   const userTenant = req.user?.tenantId ? Number(req.user.tenantId) : 1;
-  const isHQStaff = [
-    'SUPER_ADMIN', 'SUPERADMIN', 'LOGISTICS', 'OPERATIONS', 'STAFF', 'FIELD_STAFF', 'CONCIERGE', 'SECURITY', 'DRIVER', 'ADMIN'
-  ].includes(roleName) && userTenant === 1;
+  const isSuperAdmin = ['SUPER_ADMIN', 'SUPERADMIN'].includes(roleName) || req.user?.roleId === 1;
 
-  if (isHQStaff) {
-    if (req.query?.tenantId) {
-      return Number(req.query.tenantId);
-    }
-    return null; // Cross-tenant visibility for central HQ operational management
+  if (req.query?.tenantId) {
+    if (req.query.tenantId === 'all' && isSuperAdmin) return null;
+    return Number(req.query.tenantId);
   }
 
-  // All tenant accounts, SaaS clients, Business clients, and Customers: strictly their own tenant
-  return resolveTenantId(req);
+  if (isSuperAdmin && req.query?.allTenants === 'true') {
+    return null;
+  }
+
+  // Strict tenant isolation: HQ Admin (tenantId=1) sees only Tenant 1, SaaS clients see strictly their own tenant
+  return userTenant;
 };
