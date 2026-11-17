@@ -74,13 +74,25 @@ export const getItems = async (req, res, next) => {
   try {
     const rawRole = typeof req.user?.role === 'string' ? req.user.role : (req.user?.role?.name || req.user?.roleName || '');
     const roleName = String(rawRole).toUpperCase();
-    const userTenant = req.user?.tenantId ? Number(req.user.tenantId) : 1;
+    const userTenant = req.user?.tenantId ? Number(req.user.tenantId) : null;
+    const isSuperAdmin = ['SUPER_ADMIN', 'SUPERADMIN'].includes(roleName) || req.user?.roleId === 1;
+
+    let tenantIdToFilter = userTenant;
+    if (req.query.tenantId) {
+      if (req.query.tenantId === 'all' && isSuperAdmin) {
+        tenantIdToFilter = null;
+      } else {
+        tenantIdToFilter = Number(req.query.tenantId);
+      }
+    } else if (isSuperAdmin && req.query.allTenants === 'true') {
+      tenantIdToFilter = null;
+    }
+
     const isHQStaff = [
       'SUPER_ADMIN', 'SUPERADMIN', 'ADMIN', 'INVENTORY', 'INVENTORY_MANAGER', 'OPERATIONS', 'LOGISTICS', 'PROCUREMENT', 'CONCIERGE', 'STAFF', 'SECURITY'
-    ].includes(roleName) || req.user?.roleId === 1 || req.user?.roleId === 2 || (userTenant === 1 && !['BUSINESS_CLIENT', 'CUSTOMER', 'SAAS_CLIENT', 'INDIVIDUAL_CLIENT'].includes(roleName));
+    ].includes(roleName) || req.user?.roleId === 1 || req.user?.roleId === 2 || (!['BUSINESS_CLIENT', 'CUSTOMER', 'SAAS_CLIENT', 'INDIVIDUAL_CLIENT'].includes(roleName));
 
     if (isHQStaff) {
-      const tenantIdToFilter = req.query.tenantId ? Number(req.query.tenantId) : null;
       const result = await itemService.getItems(tenantIdToFilter, req.query);
       return sendResponse(res, 200, 'Items fetched successfully', result);
     }
