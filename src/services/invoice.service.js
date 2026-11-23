@@ -135,6 +135,9 @@ export const generateInvoice = async (data, performerId, tenantId) => {
 
   if (data.paidAmount && Number(data.paidAmount) > 0) {
     const paidVal = Number(data.paidAmount);
+    if (paidVal > newInvoice.totalAmount) {
+      throw new AppError(`Paid amount ($${paidVal}) cannot exceed total invoice amount ($${newInvoice.totalAmount})`, 400);
+    }
     await prisma.payment.create({
       data: {
         tenantId: newInvoice.tenantId,
@@ -254,6 +257,11 @@ export const updateInvoice = async (id, data, tenantId, performerId) => {
   const targetPaid = data.paidAmount !== undefined ? Number(data.paidAmount) : (invoice.paidAmount || 0);
   const dueDate = data.dueDate !== undefined ? new Date(data.dueDate) : invoice.dueDate;
   const now = new Date();
+
+  // Prevent overpayment: cannot pay more than total invoice amount
+  if (targetPaid > totalAmount) {
+    throw new AppError(`Paid amount ($${targetPaid}) cannot exceed total invoice amount ($${totalAmount})`, 400);
+  }
 
   if (data.status === 'Cancelled' || data.status === 'cancelled') {
     // Only set cancelled when explicitly requested
