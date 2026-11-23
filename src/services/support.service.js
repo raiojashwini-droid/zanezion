@@ -120,7 +120,8 @@ export const getTickets = async (tenantId, user) => {
   const effectiveTenantId = isHQStaff ? (tenantId && tenantId !== 1 ? tenantId : 1) : (userTenant || tenantId);
   const tickets = await supportRepository.findAllTickets(effectiveTenantId);
 
-  if (['customer', 'individual_client', 'personal', 'business_client', 'client'].some(r => normalizedRole.includes(r))) {
+  const isEndClient = !normalizedRole.includes('saas') && ['customer', 'individual_client', 'personal', 'business_client', 'client'].some(r => normalizedRole === r || normalizedRole.includes(r));
+  if (isEndClient) {
     const myUserId = user?.id;
     const myEmail = String(user?.email || '').toLowerCase().trim();
     const myClientId = user?.clientId;
@@ -144,12 +145,13 @@ export const getTicketById = async (id, tenantId, user) => {
   const ticket = await supportRepository.findTicketById(id, effectiveTenantId);
   if (!ticket) throw new AppError('Ticket not found', 404);
 
-  if (['customer', 'individual_client', 'personal'].some(r => normalizedRole.includes(r))) {
+  const isEndClient = !normalizedRole.includes('saas') && ['customer', 'individual_client', 'personal', 'business_client', 'client'].some(r => normalizedRole === r || normalizedRole.includes(r));
+  if (isEndClient) {
     const myUserId = user?.id;
     const myEmail = String(user?.email || '').toLowerCase().trim();
     const myClientId = user?.clientId;
     const isOwner = (myUserId && ticket.createdById === myUserId) ||
-      (myEmail && ticket.createdByEmail?.toLowerCase().trim() === myEmail) ||
+      (myEmail && (ticket.createdByEmail?.toLowerCase().trim() === myEmail || ticket.customerEmail?.toLowerCase().trim() === myEmail)) ||
       (myClientId && ticket.clientId === myClientId);
     if (!isOwner) {
       throw new AppError('Access denied to this ticket', 403);
@@ -268,7 +270,8 @@ export const getEvents = async (tenantId, user) => {
   const effectiveTenantId = isHQStaff ? (tenantId && tenantId !== 1 ? tenantId : 1) : (userTenant || tenantId);
   const events = await supportRepository.findAllEvents(effectiveTenantId);
 
-  if (['customer', 'individual_client', 'personal'].some(r => normalizedRole.includes(r))) {
+  const isEndClient = !normalizedRole.includes('saas') && ['customer', 'individual_client', 'personal'].some(r => normalizedRole.includes(r));
+  if (isEndClient) {
     const myUserId = user?.id;
     const myEmail = String(user?.email || '').toLowerCase().trim();
     const myClientId = user?.clientId;
@@ -351,7 +354,8 @@ export const getGuestRequests = async (tenantId, user) => {
   const effectiveTenantId = isHQStaff ? null : tenantId;
   const reqs = await supportRepository.findAllGuestRequests(effectiveTenantId);
 
-  if (['customer', 'individual_client', 'personal'].some(r => normalizedRole.includes(r))) {
+  const isEndClient = !normalizedRole.includes('saas') && ['customer', 'individual_client', 'personal'].some(r => normalizedRole.includes(r));
+  if (isEndClient) {
     const myUserId = String(user?.id);
     return reqs
       .filter(r => String(r.created_by) === myUserId || String(r.userId) === myUserId || String(r.user_id) === myUserId || (r.tenantId && r.tenantId === user?.tenantId))
