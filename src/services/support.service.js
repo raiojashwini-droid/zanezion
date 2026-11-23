@@ -120,12 +120,14 @@ export const getTickets = async (tenantId, user) => {
   const effectiveTenantId = isHQStaff ? (tenantId && tenantId !== 1 ? tenantId : 1) : (userTenant || tenantId);
   const tickets = await supportRepository.findAllTickets(effectiveTenantId);
 
-  if (['customer', 'individual_client', 'personal'].some(r => normalizedRole.includes(r))) {
+  if (['customer', 'individual_client', 'personal', 'business_client', 'client'].some(r => normalizedRole.includes(r))) {
     const myUserId = user?.id;
     const myEmail = String(user?.email || '').toLowerCase().trim();
     const myClientId = user?.clientId;
     return tickets
-      .filter(t => (myUserId && t.createdById === myUserId) || (myEmail && t.createdByEmail?.toLowerCase().trim() === myEmail) || (myClientId && t.clientId === myClientId))
+      .filter(t => (myUserId && t.createdById === myUserId) || 
+                   (myEmail && (t.createdByEmail?.toLowerCase().trim() === myEmail || t.customerEmail?.toLowerCase().trim() === myEmail)) || 
+                   (myClientId && t.clientId === myClientId))
       .map(mapTicketWithDispute);
   }
 
