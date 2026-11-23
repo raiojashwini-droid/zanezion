@@ -19,7 +19,7 @@ export const getInvoices = async (req, res, next) => {
     const tenantIdToFilter = resolveTenantId(req);
     const roleName = String(req.user.role?.name || req.user.role || '').toUpperCase();
 
-    if (['INDIVIDUAL_CLIENT', 'CUSTOMER'].includes(roleName)) {
+    if (['INDIVIDUAL_CLIENT', 'CUSTOMER', 'BUSINESS_CLIENT', 'CLIENT'].includes(roleName)) {
       let resolvedClientId = req.user.clientId;
       if (!resolvedClientId) {
         const clientRec = await prisma.client.findFirst({
@@ -35,9 +35,9 @@ export const getInvoices = async (req, res, next) => {
       if (resolvedClientId) {
         req.query.clientId = resolvedClientId;
       } else {
-        req.query.clientId = -1; // Unlinked customer has 0 invoices
+        req.query.clientId = -1; // Unlinked customer/business has 0 invoices
       }
-    } else if (['BUSINESS_CLIENT', 'CLIENT', 'SAAS_CLIENT'].includes(roleName)) {
+    } else if (['SAAS_CLIENT'].includes(roleName)) {
       if (req.user.clientId) {
         req.query.clientId = req.user.clientId;
       }
@@ -54,7 +54,18 @@ export const getInvoiceById = async (req, res, next) => {
   try {
     const tenantIdToFilter = resolveTenantId(req);
     const roleName = String(req.user.role?.name || req.user.role || '').toUpperCase();
-    const clientIdToFilter = ['INDIVIDUAL_CLIENT', 'CUSTOMER', 'BUSINESS_CLIENT', 'CLIENT', 'SAAS_CLIENT'].includes(roleName) ? req.user.clientId : null;
+    let clientIdToFilter = ['INDIVIDUAL_CLIENT', 'CUSTOMER', 'BUSINESS_CLIENT', 'CLIENT', 'SAAS_CLIENT'].includes(roleName) ? req.user.clientId : null;
+    if (!clientIdToFilter && ['INDIVIDUAL_CLIENT', 'CUSTOMER', 'BUSINESS_CLIENT', 'CLIENT'].includes(roleName)) {
+      const clientRec = await prisma.client.findFirst({
+        where: {
+          OR: [
+            { email: req.user.email },
+            { companyName: req.user.name || '' }
+          ]
+        }
+      });
+      if (clientRec) clientIdToFilter = clientRec.id;
+    }
 
     const invoice = await invoiceService.getInvoiceById(Number(req.params.id), tenantIdToFilter, clientIdToFilter);
     sendResponse(res, 200, 'Invoice fetched successfully', invoice);
