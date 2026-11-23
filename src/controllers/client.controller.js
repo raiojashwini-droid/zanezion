@@ -181,6 +181,36 @@ export const updateClient = async (req, res, next) => {
 
     const updatedClient = await clientService.updateClient(Number(req.params.id), clientData, tenantIdToFilter, req.user.id);
 
+    // Save dynamic Account Manager to ClientContact in DB
+    if (payload.accountManager || payload.account_manager) {
+      const managerName = String(payload.accountManager || payload.account_manager).trim();
+      if (managerName) {
+        try {
+          const existingAmContact = await prisma.clientContact.findFirst({
+            where: { clientId: Number(req.params.id), designation: 'Account Manager' }
+          });
+          if (existingAmContact) {
+            await prisma.clientContact.update({
+              where: { id: existingAmContact.id },
+              data: { name: managerName }
+            });
+          } else {
+            await prisma.clientContact.create({
+              data: {
+                clientId: Number(req.params.id),
+                tenantId: updatedClient.tenantId || 1,
+                name: managerName,
+                designation: 'Account Manager',
+                isPrimary: false
+              }
+            });
+          }
+        } catch (contactErr) {
+          console.warn('Could not persist Account Manager contact:', contactErr?.message || contactErr);
+        }
+      }
+    }
+
     // User Provisioning & Plan Sync Logic
     if (updatedClient.email) {
       const existingUser = await prisma.user.findFirst({

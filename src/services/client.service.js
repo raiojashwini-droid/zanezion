@@ -42,7 +42,14 @@ export const createClient = async (data, performerId, tenantId) => {
 };
 
 export const getClients = async (tenantId, query) => {
-  return await clientRepo.findAllClients(tenantId, query);
+  const result = await clientRepo.findAllClients(tenantId, query);
+  if (result?.clients && Array.isArray(result.clients)) {
+    result.clients = result.clients.map(c => ({
+      ...c,
+      accountManager: c.contacts?.find(con => con.designation === 'Account Manager')?.name || c.accountManager || null
+    }));
+  }
+  return result;
 };
 
 export const getClientById = async (id, tenantId) => {
@@ -50,7 +57,10 @@ export const getClientById = async (id, tenantId) => {
   if (!client || (tenantId !== null && client.tenantId !== tenantId)) {
     throw new AppError('Client not found', 404);
   }
-  return client;
+  return {
+    ...client,
+    accountManager: client.contacts?.find(con => con.designation === 'Account Manager')?.name || client.accountManager || null
+  };
 };
 
 export const updateClient = async (id, data, tenantId, performerId) => {

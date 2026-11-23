@@ -45,7 +45,8 @@ export const findAllClients = async (tenantId, query) => {
       where,
       skip: Number(skip),
       take: Number(limitVal),
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
+      include: { contacts: true }
     }),
     prisma.client.count({ where })
   ]);
