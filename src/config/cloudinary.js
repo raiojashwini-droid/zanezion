@@ -12,5 +12,4 @@ cloudinary.config({
 
 export const CLOUDINARY_FOLDER = cleanEnv(process.env.CLOUDINARY_FOLDER) || 'zanezion';
 
-
 export default cloudinary;
