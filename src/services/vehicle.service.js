@@ -1,12 +1,28 @@
 import * as vehicleRepo from '../repositories/vehicle.repository.js';
 import AppError from '../utils/AppError.js';
 
+const isDateExpired = (dateStr) => {
+  if (!dateStr) return false;
+  const fullStr = String(dateStr).includes('T') ? dateStr : `${dateStr}T23:59:59.999`;
+  const exp = new Date(fullStr);
+  return !isNaN(exp.getTime()) && exp.getTime() < Date.now();
+};
+
 export const createVehicle = async (data, tenantId) => {
+  if (isDateExpired(data.registrationExpiry)) {
+    data.status = 'Inactive';
+  }
   return await vehicleRepo.createVehicle({ ...data, tenantId: tenantId ? Number(tenantId) : null });
 };
 
 export const getVehicles = async (tenantId) => {
-  return await vehicleRepo.findAllVehicles(tenantId ? Number(tenantId) : null);
+  const vehicles = await vehicleRepo.findAllVehicles(tenantId ? Number(tenantId) : null);
+  return vehicles.map(v => {
+    if (isDateExpired(v.registrationExpiry)) {
+      return { ...v, status: 'Inactive' };
+    }
+    return v;
+  });
 };
 
 export const getVehicleById = async (id) => {
@@ -17,6 +33,9 @@ export const getVehicleById = async (id) => {
 
 export const updateVehicle = async (id, data) => {
   await getVehicleById(id);
+  if (isDateExpired(data.registrationExpiry)) {
+    data.status = 'Inactive';
+  }
   return await vehicleRepo.updateVehicle(Number(id), data);
 };
 
