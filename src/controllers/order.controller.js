@@ -159,9 +159,9 @@ export const getOrders = async (req, res, next) => {
       let resolvedClientId = req.user.clientId;
       if (!resolvedClientId) {
         const clientRec = (req.user.email && req.user.tenantId && req.user.tenantId !== 1
-          ? await prisma.client.findFirst({ where: { email: req.user.email, tenantId: req.user.tenantId } })
-          : null) || (req.user.email ? await prisma.client.findFirst({ where: { email: req.user.email } }) : null)
-          || (req.user.name ? await prisma.client.findFirst({ where: { companyName: req.user.name } }) : null);
+          ? await prisma.client.findFirst({ where: { email: req.user.email, tenantId: req.user.tenantId }, select: { id: true } })
+          : null) || (req.user.email ? await prisma.client.findFirst({ where: { email: req.user.email }, select: { id: true } }) : null)
+          || (req.user.name ? await prisma.client.findFirst({ where: { companyName: req.user.name }, select: { id: true } }) : null);
         if (clientRec) resolvedClientId = clientRec.id;
       }
       // Always enforce user-scoped filtering for customer accounts
@@ -176,15 +176,14 @@ export const getOrders = async (req, res, next) => {
     } else if (isClientRole) {
       let resolvedClientId = req.user.clientId;
       if (!resolvedClientId) {
-        const clientRec = (req.user.email ? await prisma.client.findFirst({ where: { email: req.user.email } }) : null)
-          || (req.user.name ? await prisma.client.findFirst({ where: { companyName: req.user.name } }) : null);
+        const clientRec = (req.user.email ? await prisma.client.findFirst({ where: { email: req.user.email }, select: { id: true } }) : null)
+          || (req.user.name ? await prisma.client.findFirst({ where: { companyName: req.user.name }, select: { id: true } }) : null);
         if (clientRec) resolvedClientId = clientRec.id;
-      }
-      if (req.user.name || req.user.companyName) {
-        req.query.customer_name = req.user.name || req.user.companyName;
       }
       if (resolvedClientId) {
         req.query.clientId = resolvedClientId;
+      } else {
+        req.query.clientId = -1;
       }
     }
 
