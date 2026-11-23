@@ -3,7 +3,7 @@ import { sendResponse } from '../utils/response.js';
 import prisma from '../config/db.js';
 import cloudinary from '../config/cloudinary.js';
 
-import { resolveTenantId } from '../utils/tenantResolver.js';
+import { resolveTenantId, getHqTenantId } from '../utils/tenantResolver.js';
 
 export const uploadItemImage = async (req, res, next) => {
   try {
@@ -93,9 +93,13 @@ export const getItems = async (req, res, next) => {
     ].includes(roleName) || req.user?.roleId === 1 || req.user?.roleId === 2 || (!['BUSINESS_CLIENT', 'CUSTOMER', 'SAAS_CLIENT', 'INDIVIDUAL_CLIENT'].includes(roleName));
 
     if (isHQStaff) {
-      const result = await itemService.getItems(tenantIdToFilter, req.query);
+      const hqTenantId = await getHqTenantId();
+      const result = await itemService.getItems(tenantIdToFilter || hqTenantId, req.query);
       return sendResponse(res, 200, 'Items fetched successfully', result);
     }
+
+    const hqTenantId = await getHqTenantId();
+    const isZaneZionClient = ['BUSINESS_CLIENT', 'CUSTOMER', 'INDIVIDUAL_CLIENT'].includes(roleName);
 
     // For Business Clients, Customers, SaaS Tenants:
     let effectiveTenantId = userTenant;
@@ -103,7 +107,7 @@ export const getItems = async (req, res, next) => {
 
     if (req.user?.email) {
       const saasClientRec = await prisma.client.findFirst({
-        where: { email: req.user.email, tenantId: { not: 1 } }
+        where: { email: req.user.email, tenantId: { not: hqTenantId } }
       });
       if (saasClientRec?.tenantId) {
         effectiveTenantId = saasClientRec.tenantId;
@@ -119,7 +123,7 @@ export const getItems = async (req, res, next) => {
         });
         if (clientRec) {
           resolvedClientId = clientRec.id;
-          if (clientRec.tenantId && clientRec.tenantId !== 1) {
+          if (clientRec.tenantId && clientRec.tenantId !== hqTenantId) {
             effectiveTenantId = clientRec.tenantId;
           }
         }
@@ -132,7 +136,15 @@ export const getItems = async (req, res, next) => {
       userTenantId: effectiveTenantId
     };
 
-    const result = await itemService.getItems(effectiveTenantId, clientQuery);
+    // Personal & Business clients of ZaneZion browse the global HQ catalog (+ any client-specific items)
+    let tenantFilter = effectiveTenantId;
+    if (isZaneZionClient) {
+      tenantFilter = (effectiveTenantId && effectiveTenantId !== hqTenantId)
+        ? [hqTenantId, effectiveTenantId]
+        : hqTenantId;
+    }
+
+    const result = await itemService.getItems(tenantFilter, clientQuery);
     return sendResponse(res, 200, 'Items fetched successfully', result);
   } catch (error) {
     next(error);

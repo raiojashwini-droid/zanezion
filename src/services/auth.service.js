@@ -7,6 +7,7 @@ import AppError from '../utils/AppError.js';
 import { logAudit } from '../utils/audit.js';
 import { sendEmail } from '../utils/mailer.js';
 import prisma from '../config/db.js';
+import { getHqTenantId } from '../utils/tenantResolver.js';
 
 export const loginUser = async (email, password, tenantId, ipAddress, userAgent) => {
   const user = await userRepository.findUserByEmailAndTenant(email, tenantId);
@@ -376,6 +377,7 @@ export const signupUser = async (data, file) => {
   }
 
   const hashedPassword = await bcrypt.hash(password, 10);
+  const hqTenantId = await getHqTenantId();
 
   const isPersonalSignup = (
     accountType?.toLowerCase() === 'personal' ||
@@ -384,24 +386,6 @@ export const signupUser = async (data, file) => {
   );
 
   if (isPersonalSignup) {
-    // Create Organization + Tenant for the personal user (required for Client FK)
-    const personalOrg = await prisma.organization.create({
-      data: {
-        name: name,
-        email,
-        phone: phone || ''
-      }
-    });
-
-    const personalTenantCode = `PERSONAL-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-    const personalTenant = await prisma.tenant.create({
-      data: {
-        organizationId: personalOrg.id,
-        tenantCode: personalTenantCode,
-        status: 'active'
-      }
-    });
-
     const user = await prisma.user.create({
       data: {
         name,
@@ -409,14 +393,14 @@ export const signupUser = async (data, file) => {
         password: hashedPassword,
         phone,
         roleId: roleRecord.id,
-        tenantId: personalTenant.id,
+        tenantId: hqTenantId,
         status: 'active'
       }
     });
 
     await prisma.client.create({
       data: {
-        tenantId: personalTenant.id,
+        tenantId: hqTenantId,
         clientCode: `CLT-${crypto.randomBytes(4).toString('hex').toUpperCase()}`,
         companyName: name,
         contactPerson: name,
@@ -426,6 +410,44 @@ export const signupUser = async (data, file) => {
         plan: 'Free',
         source: 'Website',
         status: 'active'
+      }
+    });
+
+    return user;
+  }
+
+  const isBusinessSignup = (
+    accountType?.toLowerCase() === 'business' ||
+    role?.toLowerCase() === 'client' ||
+    role?.toLowerCase() === 'business_client' ||
+    dbRoleName === 'BUSINESS_CLIENT'
+  );
+
+  if (isBusinessSignup) {
+    const user = await prisma.user.create({
+      data: {
+        name,
+        email,
+        password: hashedPassword,
+        phone,
+        roleId: roleRecord.id,
+        tenantId: hqTenantId,
+        status: 'pending_approval'
+      }
+    });
+
+    await prisma.client.create({
+      data: {
+        tenantId: hqTenantId,
+        clientCode: `CLT-${crypto.randomBytes(4).toString('hex').toUpperCase()}`,
+        companyName: companyName || name,
+        contactPerson: name,
+        email,
+        phone: phone || '',
+        clientType: 'Business',
+        plan: 'Enterprise',
+        source: file ? file.filename : 'Website',
+        status: 'pending_approval'
       }
     });
 

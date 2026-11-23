@@ -1,3 +1,33 @@
+import prisma from '../config/db.js';
+
+let cachedHqTenantId = null;
+
+/**
+ * Dynamically resolves the Root / HQ Tenant ID (ZaneZion Global Platform).
+ * Avoids fragile hardcoding of tenantId === 1.
+ */
+export const getHqTenantId = async () => {
+  if (cachedHqTenantId) return cachedHqTenantId;
+  try {
+    const rootTenant = await prisma.tenant.findFirst({
+      where: {
+        OR: [
+          { tenantCode: 'ZNZ-ROOT' },
+          { id: 1 }
+        ]
+      },
+      select: { id: true }
+    });
+    if (rootTenant?.id) {
+      cachedHqTenantId = rootTenant.id;
+      return cachedHqTenantId;
+    }
+  } catch (err) {
+    console.error('Error resolving dynamic HQ tenant ID:', err?.message || err);
+  }
+  return 1;
+};
+
 /**
  * Centralized Tenant ID Resolver for SaaS Multi-Tenant Isolation.
  *

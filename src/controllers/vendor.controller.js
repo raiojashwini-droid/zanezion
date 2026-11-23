@@ -1,7 +1,7 @@
 import * as vendorService from '../services/vendor.service.js';
 import { sendResponse } from '../utils/response.js';
 import AppError from '../utils/AppError.js';
-import { resolveTenantId } from '../utils/tenantResolver.js';
+import { resolveTenantId, getHqTenantId } from '../utils/tenantResolver.js';
 
 export const createVendor = async (req, res, next) => {
   try {
@@ -42,13 +42,25 @@ const checkIsClient = (user) => {
 
 export const getVendors = async (req, res, next) => {
   try {
-    const isSuperAdmin = req.user.role?.name === 'SUPER_ADMIN';
+    const roleName = String(req.user?.role?.name || req.user?.role || '').toUpperCase();
+    const isSuperAdmin = roleName === 'SUPER_ADMIN' || roleName === 'SUPERADMIN' || req.user?.roleId === 1;
     const isClient = checkIsClient(req.user);
-    const isSaaSTenant = req.user.tenantId && Number(req.user.tenantId) !== 1;
-    const tenantIdToFilter = isSuperAdmin && !req.query.tenantId ? null :
-                             isSaaSTenant ? Number(req.user.tenantId) :
-                             isClient ? (req.user.tenantId || 1) :
-                             (req.query.tenantId ? Number(req.query.tenantId) : req.user.tenantId);
+    const isSaaS = roleName === 'SAAS_CLIENT' || roleName === 'SAAS_ADMIN';
+    const hqTenantId = await getHqTenantId();
+
+    let tenantIdToFilter = null;
+    if (isSuperAdmin && !req.query.tenantId) {
+      tenantIdToFilter = null;
+    } else if (isSaaS) {
+      tenantIdToFilter = req.user.tenantId ? Number(req.user.tenantId) : null;
+    } else if (isClient) {
+      // Personal and Business clients see vendors from ZaneZion HQ (+ any tenant vendors if assigned)
+      tenantIdToFilter = (req.user.tenantId && Number(req.user.tenantId) !== hqTenantId)
+        ? [hqTenantId, Number(req.user.tenantId)]
+        : hqTenantId;
+    } else {
+      tenantIdToFilter = req.query.tenantId ? Number(req.query.tenantId) : (req.user.tenantId || hqTenantId);
+    }
 
     const result = await vendorService.getVendors(tenantIdToFilter, req.query);
     sendResponse(res, 200, 'Vendors fetched successfully', result);
