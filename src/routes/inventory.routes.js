@@ -11,6 +11,7 @@ router.use(authenticate);
 router.post('/issue', checkPermission('STOCK', 'ADJUST'), validate(issueStockSchema), inventoryController.issueStock);
 router.post('/loss', checkPermission('STOCK', 'ADJUST'), validate(recordLossSchema), inventoryController.recordLoss);
 router.get('/loss', checkPermission('STOCK', 'READ'), inventoryController.getLossAssessments);
+router.get('/alerts', checkPermission('ITEMS', 'READ'), inventoryController.getInventoryAlerts);
 router.get('/', checkPermission('ITEMS', 'READ'), inventoryController.getInventory);
 
 export default router;

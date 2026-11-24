@@ -95,7 +95,6 @@ app.get('/api/v1/health', (req, res) => {
 });
 
 import authRoutes from './routes/auth.routes.js';
-import { handleMockRequest } from './utils/mockApi.js';
 import userRoutes from './routes/user.routes.js';
 import roleRoutes from './routes/role.routes.js';
 import permissionRoutes from './routes/permission.routes.js';
@@ -209,29 +208,13 @@ app.use('/api/v1/payments', paymentRoutes);
 // Fleet / Vehicles
 app.use('/api/v1/vehicles', vehicleRoutes);
 
-// Fallback to Mock API for unimplemented routes
-app.use(async (req, res, next) => {
-  try {
-    const result = await handleMockRequest(req.method, req.originalUrl, req.body);
-    if (result && result.data) {
-      res.status(200).json(result.data);
-    } else {
-      res.status(404).json({
-        success: false,
-        message: `Route not found: ${req.method} ${req.originalUrl}`,
-        data: null
-      });
-    }
-  } catch (error) {
-    if (error.response && error.response.status) {
-      return res.status(error.response.status).json(error.response.data);
-    }
-    res.status(404).json({
-      success: false,
-      message: `Route not found: ${req.method} ${req.originalUrl}`,
-      data: null
-    });
-  }
+// 404 Handler for Unmatched Routes
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `Route not found: ${req.method} ${req.originalUrl}`,
+    data: null
+  });
 });
 
 // Global Error Handler

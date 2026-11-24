@@ -102,3 +102,75 @@ export const getInventory = async (req, res, next) => {
   }
 };
 
+export const getInventoryAlerts = async (req, res, next) => {
+  try {
+    const roleName = String(req.user.role?.name || req.user.role || '').toUpperCase();
+    const isSuperAdmin = ['SUPER_ADMIN', 'SUPERADMIN'].includes(roleName) || req.user.roleId === 1;
+    const tenantId = (isSuperAdmin && req.query?.tenantId)
+      ? Number(req.query.tenantId)
+      : resolveTenantId(req);
+
+    const items = await prisma.item.findMany({
+      where: {
+        ...(tenantId !== null && (Array.isArray(tenantId) ? { tenantId: { in: tenantId } } : { tenantId })),
+        status: 'active'
+      },
+      include: {
+        category: true,
+        unit: true,
+        inventoryStock: {
+          include: {
+            warehouse: true
+          }
+        }
+      }
+    });
+
+    const alerts = [];
+    items.forEach((item) => {
+      const totalQty = item.inventoryStock.reduce((sum, stock) => sum + stock.quantity, 0);
+      const reorderLevel = Number(item.reorderLevel) || 10;
+      const firstStock = item.inventoryStock[0];
+      const warehouseName = firstStock?.warehouse?.name || 'General Storage';
+
+      if (totalQty === 0) {
+        alerts.push({
+          id: `ALT-OUT-${item.id}`,
+          itemId: item.id,
+          name: item.name,
+          sku: item.sku,
+          quantity: 0,
+          qty: 0,
+          threshold: reorderLevel,
+          status: 'out_of_stock',
+          alert_level: 'Critical',
+          warehouse_name: warehouseName,
+          location: warehouseName,
+          category: item.category?.name || 'General',
+          tenantId: item.tenantId
+        });
+      } else if (totalQty <= reorderLevel) {
+        alerts.push({
+          id: `ALT-LOW-${item.id}`,
+          itemId: item.id,
+          name: item.name,
+          sku: item.sku,
+          quantity: totalQty,
+          qty: totalQty,
+          threshold: reorderLevel,
+          status: 'low_stock',
+          alert_level: 'Warning',
+          warehouse_name: warehouseName,
+          location: warehouseName,
+          category: item.category?.name || 'General',
+          tenantId: item.tenantId
+        });
+      }
+    });
+
+    sendResponse(res, 200, 'Inventory alerts fetched successfully', alerts);
+  } catch (error) {
+    next(error);
+  }
+};
+
