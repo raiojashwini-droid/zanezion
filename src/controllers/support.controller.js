@@ -7,27 +7,26 @@ import { resolveTenantId } from '../utils/tenantResolver.js';
 const handleRequest = async (req, res, next, serviceFn, successMsg, eventName) => {
   try {
     const roleName = String(typeof req.user?.role === 'string' ? req.user.role : (req.user?.role?.name || '')).toUpperCase();
-    const isSuperAdminOrAdmin = ['SUPER_ADMIN', 'SUPERADMIN', 'ADMIN'].includes(roleName) && (Number(req.user.tenantId) === 1 || !req.user.tenantId);
-    let tenantId;
+    const isSuperAdmin = ['SUPER_ADMIN', 'SUPERADMIN'].includes(roleName) || req.user?.roleId === 1;
+    const tenantId = (isSuperAdmin && req.query?.tenantId)
+      ? Number(req.query.tenantId)
+      : resolveTenantId(req);
     
     if (req.method === 'GET') {
-      tenantId = resolveTenantId(req);
       const result = await serviceFn(tenantId, req.user);
       sendResponse(res, 200, successMsg, result);
     } else if (req.method === 'POST') {
-      tenantId = isSuperAdminOrAdmin ? (req.body.tenantId || req.user.tenantId || 1) : (req.user.tenantId || 1);
-      const result = await serviceFn(req.body, req.user.id, tenantId);
-      if (eventName) emitToTenant(result.tenantId || tenantId, eventName, result);
+      const targetTenantId = (isSuperAdmin && req.body?.tenantId) ? Number(req.body.tenantId) : tenantId;
+      const result = await serviceFn(req.body, req.user.id, targetTenantId);
+      if (eventName) emitToTenant(result.tenantId || targetTenantId, eventName, result);
       sendResponse(res, 201, successMsg, result);
     } else if (req.method === 'PUT') {
-      tenantId = isSuperAdminOrAdmin ? null : resolveTenantId(req);
       const result = await serviceFn(req.params.id, req.body, tenantId, req.user.id);
-      if (eventName) emitToTenant(result.tenantId || tenantId || req.user.tenantId, eventName, result);
+      if (eventName) emitToTenant(result.tenantId || tenantId, eventName, result);
       sendResponse(res, 200, successMsg, result);
     } else if (req.method === 'DELETE') {
-      tenantId = isSuperAdminOrAdmin ? null : resolveTenantId(req);
       await serviceFn(req.params.id, tenantId, req.user.id);
-      if (eventName) emitToTenant(tenantId || req.user.tenantId, eventName, { id: req.params.id, deleted: true });
+      if (eventName) emitToTenant(tenantId, eventName, { id: req.params.id, deleted: true });
       sendResponse(res, 200, successMsg, null);
     }
   } catch (error) {
