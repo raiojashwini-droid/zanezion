@@ -248,9 +248,19 @@ export const getOrderTimeline = async (req, res, next) => {
       try {
         const user = await prisma.user.findUnique({
           where: { id: Number(entry.movedBy) },
-          select: { firstName: true, lastName: true, email: true }
+          select: { name: true, email: true }
         });
-        if (user) moverName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+        if (user && (user.name || user.email)) {
+          moverName = user.name || user.email;
+        } else {
+          const emp = await prisma.employee.findUnique({
+            where: { id: Number(entry.movedBy) },
+            select: { firstName: true, lastName: true }
+          });
+          if (emp) {
+            moverName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || moverName;
+          }
+        }
       } catch (_) { }
       return { ...entry, moverName };
     }));
