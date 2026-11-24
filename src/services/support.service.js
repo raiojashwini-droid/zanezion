@@ -1,3 +1,4 @@
+import prisma from '../config/db.js';
 import * as supportRepository from '../repositories/support.repository.js';
 import AppError from '../utils/AppError.js';
 import { logAudit } from '../utils/audit.js';
