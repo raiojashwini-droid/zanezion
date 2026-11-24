@@ -446,6 +446,7 @@ export const approvePurchaseOrderReceipt = async (id, tenantId, performerId) => 
           }
         });
 
+        const itemPrice = Number(item.estimatedCost || (po.totalAmount && item.quantity ? po.totalAmount / item.quantity : 0));
         let invItem = await tx.item.findFirst({
           where: { tenantId: actualTenantId, name: item.itemName }
         });
@@ -470,8 +471,14 @@ export const approvePurchaseOrderReceipt = async (id, tenantId, performerId) => 
               unitId: unit.id,
               sku,
               name: item.itemName,
+              price: itemPrice,
               status: 'active'
             }
+          });
+        } else if (itemPrice > 0 && Number(invItem.price || 0) === 0) {
+          invItem = await tx.item.update({
+            where: { id: invItem.id },
+            data: { price: itemPrice }
           });
         }
 
