@@ -1,5 +1,6 @@
 import prisma from '../config/db.js';
 import { sendResponse } from '../utils/response.js';
+import { resolveTenantId } from '../utils/tenantResolver.js';
 
 /**
  * Recalculates exact vacation balance for a user:
@@ -59,12 +60,12 @@ export const recalculateUserVacationBalance = async (userId) => {
 
 export const getLeaveRequests = async (req, res, next) => {
   try {
-    const roleName = req.user?.role?.name || '';
-    const isAdmin = ['SUPER_ADMIN', 'ADMIN', 'superadmin', 'admin'].includes(roleName);
-    const tenantIdToFilter = isAdmin ? null : req.user?.tenantId;
+    const tenantIdToFilter = resolveTenantId(req);
 
     const where = {};
-    if (tenantIdToFilter) where.tenantId = tenantIdToFilter;
+    if (tenantIdToFilter !== null && tenantIdToFilter !== undefined) {
+      where.tenantId = Number(tenantIdToFilter);
+    }
 
     // Recalculate balance for logged-in user on fetch to keep DB in sync
     if (req.user?.id) {
@@ -74,29 +75,30 @@ export const getLeaveRequests = async (req, res, next) => {
     const leaveRequests = await prisma.leaveRequest.findMany({
       where,
       include: {
-        user: { select: { id: true, name: true, email: true, vacationBalance: true } },
+        user: { select: { id: true, name: true, email: true, vacationBalance: true, tenantId: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    const mappedData = leaveRequests.map((req) => {
-      const sDate = new Date(req.startDate);
-      const eDate = new Date(req.endDate);
+    const mappedData = leaveRequests.map((reqItem) => {
+      const sDate = new Date(reqItem.startDate);
+      const eDate = new Date(reqItem.endDate);
       const diffMs = Math.abs(eDate.getTime() - sDate.getTime());
       const diffDays = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1);
       const calculatedHours = diffDays * 24; // 24 hours per day (2 days = 48h)
 
       return {
-        id: req.id,
-        userId: req.userId,
-        name: req.user?.name,
-        type: req.leaveType,
-        hours: req.hours || calculatedHours,
-        start: req.startDate.toISOString().split('T')[0],
-        end: req.endDate.toISOString().split('T')[0],
-        reason: req.reason,
-        status: req.status,
-        createdAt: req.createdAt,
+        id: reqItem.id,
+        userId: reqItem.userId,
+        tenantId: reqItem.tenantId,
+        name: reqItem.user?.name,
+        type: reqItem.leaveType,
+        hours: reqItem.hours || calculatedHours,
+        start: reqItem.startDate.toISOString().split('T')[0],
+        end: reqItem.endDate.toISOString().split('T')[0],
+        reason: reqItem.reason,
+        status: reqItem.status,
+        createdAt: reqItem.createdAt,
       };
     });
 
@@ -110,6 +112,17 @@ export const createLeaveRequest = async (req, res, next) => {
   try {
     const { user_id, company_id, leave_type, start_date, end_date, reason } = req.body;
 
+    const targetUserId = Number(user_id) || req.user.id;
+    let targetTenantId = Number(company_id) || null;
+
+    if (!targetTenantId) {
+      const targetUser = await prisma.user.findUnique({
+        where: { id: targetUserId },
+        select: { tenantId: true }
+      });
+      targetTenantId = targetUser?.tenantId || resolveTenantId(req);
+    }
+
     const sDate = new Date(start_date);
     const eDate = new Date(end_date);
     const diffMs = Math.abs(eDate.getTime() - sDate.getTime());
@@ -119,8 +132,8 @@ export const createLeaveRequest = async (req, res, next) => {
     // New requests start strictly with status 'Pending' (Admin approval required)
     const newRequest = await prisma.leaveRequest.create({
       data: {
-        userId: Number(user_id) || req.user.id,
-        tenantId: Number(company_id) || req.user.tenantId,
+        userId: targetUserId,
+        tenantId: Number(targetTenantId),
         leaveType: leave_type,
         startDate: sDate,
         endDate: eDate,
@@ -129,13 +142,14 @@ export const createLeaveRequest = async (req, res, next) => {
         status: 'Pending',
       },
       include: {
-        user: { select: { id: true, name: true, email: true, vacationBalance: true } },
+        user: { select: { id: true, name: true, email: true, vacationBalance: true, tenantId: true } },
       },
     });
 
     const mappedData = {
       id: newRequest.id,
       userId: newRequest.userId,
+      tenantId: newRequest.tenantId,
       name: newRequest.user?.name,
       type: newRequest.leaveType,
       hours: newRequest.hours,
@@ -200,6 +214,7 @@ export const updateLeaveRequest = async (req, res, next) => {
     const mappedData = {
       id: updatedRequest.id,
       userId: updatedRequest.userId,
+      tenantId: updatedRequest.tenantId,
       name: updatedRequest.user?.name,
       type: updatedRequest.leaveType,
       hours: updatedRequest.hours,
