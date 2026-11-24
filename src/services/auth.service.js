@@ -64,6 +64,22 @@ export const loginUser = async (email, password, tenantId, ipAddress, userAgent)
         } catch (_) {}
       }
     }
+
+    if (user.tenantId && user.tenantId !== 1) {
+      try {
+        const saasOwner = await prisma.client.findFirst({
+          where: { tenantId: user.tenantId, clientType: 'SaaS' },
+          select: { id: true, companyName: true, logoUrl: true, clientType: true, tenantId: true }
+        }) || await prisma.client.findFirst({
+          where: { tenantId: user.tenantId },
+          select: { id: true, companyName: true, logoUrl: true, clientType: true, tenantId: true }
+        });
+        if (saasOwner) {
+          user.tenantCompanyName = saasOwner.companyName;
+          user.tenantLogoUrl = saasOwner.logoUrl;
+        }
+      } catch (_) {}
+    }
   }
 
   const token = jwt.sign(
@@ -218,6 +234,22 @@ export const getProfile = async (userId) => {
           });
         } catch (_) {}
       }
+    }
+
+    if (user.tenantId && user.tenantId !== 1) {
+      try {
+        const saasOwner = await prisma.client.findFirst({
+          where: { tenantId: user.tenantId, clientType: 'SaaS' },
+          select: { id: true, companyName: true, logoUrl: true, clientType: true, tenantId: true }
+        }) || await prisma.client.findFirst({
+          where: { tenantId: user.tenantId },
+          select: { id: true, companyName: true, logoUrl: true, clientType: true, tenantId: true }
+        });
+        if (saasOwner) {
+          user.tenantCompanyName = saasOwner.companyName;
+          user.tenantLogoUrl = saasOwner.logoUrl;
+        }
+      } catch (_) {}
     }
   }
 
