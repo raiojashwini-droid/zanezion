@@ -112,15 +112,40 @@ export const createLeaveRequest = async (req, res, next) => {
   try {
     const { user_id, company_id, leave_type, start_date, end_date, reason } = req.body;
 
-    const targetUserId = Number(user_id) || req.user.id;
+    let targetUserId = Number(user_id) || req.user.id;
     let targetTenantId = Number(company_id) || null;
 
-    if (!targetTenantId) {
-      const targetUser = await prisma.user.findUnique({
+    // Verify if targetUserId exists in the users table
+    let targetUser = await prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { id: true, tenantId: true }
+    });
+
+    // If not found directly in users, check if an Employee ID was passed
+    if (!targetUser) {
+      const emp = await prisma.employee.findUnique({
         where: { id: targetUserId },
-        select: { tenantId: true }
+        select: { userId: true, tenantId: true }
       });
-      targetTenantId = targetUser?.tenantId || resolveTenantId(req);
+      if (emp && emp.userId) {
+        targetUserId = emp.userId;
+        targetUser = await prisma.user.findUnique({
+          where: { id: targetUserId },
+          select: { id: true, tenantId: true }
+        });
+      }
+    }
+
+    // If user account is still not found, return clean 400 error instead of uncaught Prisma 500 crash
+    if (!targetUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'Unable to submit leave request: Linked employee user account was not found.'
+      });
+    }
+
+    if (!targetTenantId) {
+      targetTenantId = targetUser.tenantId || resolveTenantId(req);
     }
 
     const sDate = new Date(start_date);
