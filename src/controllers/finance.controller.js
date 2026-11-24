@@ -4,9 +4,11 @@ import AppError from '../utils/AppError.js';
 
 export const getPayrolls = async (req, res, next) => {
   try {
-    const isSuperAdmin = req.user.role?.name === 'SUPER_ADMIN';
-    const isClient = ['BUSINESS_CLIENT', 'INDIVIDUAL_CLIENT'].includes(req.user.role?.name);
-    const isAdmin = req.user.role?.name === 'ADMIN' || isSuperAdmin || isClient;
+    const roleName = String(req.user.role?.name || req.user.role || '').toUpperCase();
+    const isSuperAdmin = roleName === 'SUPER_ADMIN' || roleName === 'SUPERADMIN';
+    const isSaasClient = roleName === 'SAAS_CLIENT';
+    const isClient = ['BUSINESS_CLIENT', 'INDIVIDUAL_CLIENT'].includes(roleName);
+    const isAdmin = roleName === 'ADMIN' || isSuperAdmin || isSaasClient || isClient;
     const tenantIdToFilter = isSuperAdmin && !req.query.tenantId ? null : (req.query.tenantId ? Number(req.query.tenantId) : req.user.tenantId);
 
     // Non-admins can only see their own payroll records
@@ -37,10 +39,12 @@ export const getPayrolls = async (req, res, next) => {
 
 export const createPayroll = async (req, res, next) => {
   try {
-    const isSuperAdmin = req.user.role?.name === 'SUPER_ADMIN';
-    const isClient = ['BUSINESS_CLIENT', 'INDIVIDUAL_CLIENT'].includes(req.user.role?.name);
-    const isAdmin = req.user.role?.name === 'ADMIN' || isClient;
-    if (!isSuperAdmin && !isAdmin) {
+    const roleName = String(req.user.role?.name || req.user.role || '').toUpperCase();
+    const isSuperAdmin = roleName === 'SUPER_ADMIN' || roleName === 'SUPERADMIN';
+    const isSaasClient = roleName === 'SAAS_CLIENT';
+    const isClient = ['BUSINESS_CLIENT', 'INDIVIDUAL_CLIENT'].includes(roleName);
+    const isAdmin = roleName === 'ADMIN' || isSuperAdmin || isSaasClient || isClient;
+    if (!isAdmin) {
       throw new AppError('Access denied. Admin permissions required.', 403);
     }
     const tenantIdToUse = isSuperAdmin ? (req.body.tenantId || req.user.tenantId || 1) : (req.user.tenantId || 1);
@@ -54,10 +58,12 @@ export const createPayroll = async (req, res, next) => {
 
 export const updatePayroll = async (req, res, next) => {
   try {
-    const isSuperAdmin = req.user.role?.name === 'SUPER_ADMIN';
-    const isClient = ['BUSINESS_CLIENT', 'INDIVIDUAL_CLIENT'].includes(req.user.role?.name);
-    const isAdmin = req.user.role?.name === 'ADMIN' || isClient;
-    if (!isSuperAdmin && !isAdmin) {
+    const roleName = String(req.user.role?.name || req.user.role || '').toUpperCase();
+    const isSuperAdmin = roleName === 'SUPER_ADMIN' || roleName === 'SUPERADMIN';
+    const isSaasClient = roleName === 'SAAS_CLIENT';
+    const isClient = ['BUSINESS_CLIENT', 'INDIVIDUAL_CLIENT'].includes(roleName);
+    const isAdmin = roleName === 'ADMIN' || isSuperAdmin || isSaasClient || isClient;
+    if (!isAdmin) {
       throw new AppError('Access denied. Admin permissions required.', 403);
     }
     const tenantIdToUse = isSuperAdmin ? (req.body.tenantId || req.user.tenantId || 1) : (req.user.tenantId || 1);
@@ -71,10 +77,12 @@ export const updatePayroll = async (req, res, next) => {
 
 export const deletePayroll = async (req, res, next) => {
   try {
-    const isSuperAdmin = req.user.role?.name === 'SUPER_ADMIN';
-    const isClient = ['BUSINESS_CLIENT', 'INDIVIDUAL_CLIENT'].includes(req.user.role?.name);
-    const isAdmin = req.user.role?.name === 'ADMIN' || isClient;
-    if (!isSuperAdmin && !isAdmin) {
+    const roleName = String(req.user.role?.name || req.user.role || '').toUpperCase();
+    const isSuperAdmin = roleName === 'SUPER_ADMIN' || roleName === 'SUPERADMIN';
+    const isSaasClient = roleName === 'SAAS_CLIENT';
+    const isClient = ['BUSINESS_CLIENT', 'INDIVIDUAL_CLIENT'].includes(roleName);
+    const isAdmin = roleName === 'ADMIN' || isSuperAdmin || isSaasClient || isClient;
+    if (!isAdmin) {
       throw new AppError('Access denied. Admin permissions required.', 403);
     }
     const tenantIdToUse = isSuperAdmin ? (req.query.tenantId || req.user.tenantId || 1) : (req.user.tenantId || 1);
