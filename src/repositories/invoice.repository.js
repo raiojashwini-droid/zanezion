@@ -1,13 +1,14 @@
 import prisma from '../config/db.js';
 
-const generateInvoiceNumber = async (tenantId) => {
-  const count = await prisma.invoice.count({ where: { tenantId } });
+const generateInvoiceNumber = async (tenantId, tx = null) => {
+  const db = tx || prisma;
+  const count = await db.invoice.count({ where: { tenantId } });
   return `INV-${new Date().getFullYear()}-${String(count + 1).padStart(5, '0')}`;
 };
 
 export const createInvoice = async (data, items, tenantId) => {
   return await prisma.$transaction(async (tx) => {
-    const invoiceNumber = await generateInvoiceNumber(tenantId);
+    const invoiceNumber = await generateInvoiceNumber(tenantId, tx);
     
     // Calculate totals
     let subtotal = 0;
@@ -53,7 +54,7 @@ export const createInvoice = async (data, items, tenantId) => {
       },
       include: { items: true, client: true, order: true, delivery: true }
     });
-  });
+  }, { timeout: 30000, maxWait: 15000 });
 };
 
 export const findInvoiceById = async (id) => {
