@@ -1,15 +1,15 @@
 import prisma from '../config/db.js';
 
-const generatePRNumber = async (tenantId) => {
+const generatePRNumber = async (tenantId, tx = prisma) => {
   const safeTenantId = tenantId || 1;
-  const count = await prisma.purchaseRequest.count({ where: { tenantId: safeTenantId } });
+  const count = await tx.purchaseRequest.count({ where: { tenantId: safeTenantId } });
   return `PR-${new Date().getFullYear()}-${String(count + 1).padStart(4, '0')}`;
 };
 
 export const createPurchaseRequest = async (data, items, tenantId) => {
   const safeTenantId = tenantId || 1;
   return await prisma.$transaction(async (tx) => {
-    const prNumber = await generatePRNumber(safeTenantId);
+    const prNumber = await generatePRNumber(safeTenantId, tx);
     
     return await tx.purchaseRequest.create({
       data: {
@@ -22,7 +22,7 @@ export const createPurchaseRequest = async (data, items, tenantId) => {
       },
       include: { items: true }
     });
-  });
+  }, { timeout: 30000, maxWait: 15000 });
 };
 
 export const findPurchaseRequestById = async (id) => {
