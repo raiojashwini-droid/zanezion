@@ -744,6 +744,30 @@ export const updateMissionStatus = async (id, status, tenantId, performerId) => 
     }
     await submitPOD(id, { signature: 'System Verified' }, tenantId, performerId);
     return await missionRepo.findMissionById(id);
+  } else if (newStatus === 'pending') {
+    // Declining/resetting mission to pending: clear driver metadata and update linked delivery
+    const updated = await prisma.mission.update({
+      where: { id: mission.id },
+      data: {
+        status: 'pending',
+        metadata: {
+          ...(typeof mission.metadata === 'object' ? mission.metadata : {}),
+          driverId: null,
+          driverName: null,
+          declinedBy: performerId,
+          declinedAt: new Date().toISOString()
+        }
+      }
+    });
+    if (mission.deliveryId) {
+      try {
+        await prisma.delivery.update({
+          where: { id: mission.deliveryId },
+          data: { status: 'pending', assignedTo: null }
+        });
+      } catch (_) {}
+    }
+    return updated;
   } else {
     // Just a basic status update for failed/cancelled
     const updated = await prisma.mission.update({
