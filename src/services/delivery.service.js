@@ -795,7 +795,6 @@ export const updateDelivery = async (id, data, tenantId, performerId, clientId =
               movementType: 'OUT',
               quantity: item.quantity,
               referenceType: 'DELIVERY',
-              referenceId: String(targetDeliveryId),
               remarks: `Fulfilled via Delivery #${delivery.deliveryNumber || targetDeliveryId} delivered to recipient`
             }
           });

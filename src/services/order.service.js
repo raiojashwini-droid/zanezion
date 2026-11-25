@@ -152,7 +152,6 @@ export const deductStockForOrderDelivery = async (tx, order) => {
           movementType: 'OUT',
           quantity: reqQty,
           referenceType: 'DELIVERY',
-          referenceId: String(order.id),
           remarks: `Order #${order.orderNumber || order.id} delivered and stock deducted`
         }
       });
