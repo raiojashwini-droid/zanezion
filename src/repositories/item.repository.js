@@ -96,7 +96,36 @@ export const findAllItems = async (tenantId, query = {}) => {
     prisma.item.count({ where })
   ]);
 
-  return { items, total, page: Number(page), totalPages: Math.ceil(total / limitVal) };
+  // Enrich items with latest PO sourcing vendor name within tenant
+  const enrichedItems = await Promise.all(items.map(async (item) => {
+    try {
+      const latestPO = await prisma.purchaseOrder.findFirst({
+        where: {
+          tenantId: item.tenantId,
+          purchaseRequest: {
+            items: {
+              some: {
+                itemName: item.name
+              }
+            }
+          }
+        },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          vendor: { select: { companyName: true } }
+        }
+      });
+      return {
+        ...item,
+        vendorName: latestPO?.vendor?.companyName || null,
+        store: latestPO?.vendor?.companyName || null
+      };
+    } catch (_) {
+      return item;
+    }
+  }));
+
+  return { items: enrichedItems, total, page: Number(page), totalPages: Math.ceil(total / limitVal) };
 };
 
 export const updateItem = async (id, data) => {

@@ -422,12 +422,27 @@ export const getProjects = async (req, res, next) => {
       where,
       orderBy: { createdAt: 'desc' },
       include: {
-        client: { select: { companyName: true, clientCode: true } }
+        client: { select: { companyName: true, clientCode: true } },
+        items: {
+          include: {
+            item: { select: { id: true, name: true, sku: true } }
+          }
+        }
       }
     });
 
     const formattedProjects = projects.map(project => {
       const metadataObj = typeof project.metadata === 'string' ? JSON.parse(project.metadata) : (project.metadata || {});
+      const mappedItems = (project.items && project.items.length > 0)
+        ? project.items.map(oi => ({
+            id: oi.id,
+            itemId: oi.itemId,
+            name: oi.item?.name || oi.customName || 'Item',
+            qty: Number(oi.quantity || 1),
+            price: Number(oi.unitPrice || 0)
+          }))
+        : (metadataObj.items || []);
+
       return {
         id: project.id,
         name: metadataObj.name || project.orderNumber,
@@ -436,10 +451,12 @@ export const getProjects = async (req, res, next) => {
         start: metadataObj.startDate || metadataObj.start || '',
         location: metadataObj.location || '',
         status: project.status,
+        fulfilled: ['completed', 'fulfilled'].includes(String(project.status).toLowerCase()),
         deliveryType: metadataObj.delivery_type || metadataObj.deliveryType || 'Road',
         companyId: metadataObj.companyId || null,
         customerId: metadataObj.customerId || null,
-        clientUserId: metadataObj.clientUserId || null
+        clientUserId: metadataObj.clientUserId || null,
+        items: mappedItems
       };
     });
 
