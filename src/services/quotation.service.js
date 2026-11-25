@@ -67,25 +67,7 @@ export const getQuotationById = async (id, tenantId) => {
 
 export const ensurePurchaseRequestForQuotation = async (quotation, performerId) => {
   try {
-    // Check if already linked to a PR
     let existingPrId = quotation.rfq?.purchaseRequestId || quotation.metadata?.purchaseRequestId;
-    if (existingPrId) {
-      return existingPrId;
-    }
-
-    // Dynamic department lookup for this specific tenant
-    let dept = await prisma.department.findFirst({
-      where: {
-        tenantId: quotation.tenantId,
-        status: 'active'
-      },
-      orderBy: { id: 'asc' }
-    });
-    if (!dept) {
-      dept = await prisma.department.findFirst({
-        where: { tenantId: quotation.tenantId }
-      });
-    }
 
     // Extract line items
     let rawItems = [];
@@ -112,6 +94,42 @@ export const ensurePurchaseRequestForQuotation = async (quotation, performerId) 
 
     const firstItemName = prItems[0]?.itemName || 'Asset';
     const requesterUserId = quotation.metadata?.userId ? Number(quotation.metadata.userId) : (performerId || 1);
+
+    // If PR already exists, update its line items and status so it matches quote edits!
+    if (existingPrId) {
+      await prisma.$transaction(async (tx) => {
+        await tx.purchaseRequestItem.deleteMany({ where: { purchaseRequestId: Number(existingPrId) } });
+        await tx.purchaseRequestItem.createMany({
+          data: prItems.map(it => ({
+            ...it,
+            purchaseRequestId: Number(existingPrId)
+          }))
+        });
+        await tx.purchaseRequest.update({
+          where: { id: Number(existingPrId) },
+          data: {
+            title: `${firstItemName} (Quote QUO-${quotation.id})`,
+            status: 'approved'
+          }
+        });
+      }, { timeout: 30000, maxWait: 15000 });
+      console.log(`[PR_AUTO_GEN] Synchronized existing PR ${existingPrId} with updated items for Quote QUO-${quotation.id}`);
+      return existingPrId;
+    }
+
+    // Dynamic department lookup for this specific tenant
+    let dept = await prisma.department.findFirst({
+      where: {
+        tenantId: quotation.tenantId,
+        status: 'active'
+      },
+      orderBy: { id: 'asc' }
+    });
+    if (!dept) {
+      dept = await prisma.department.findFirst({
+        where: { tenantId: quotation.tenantId }
+      });
+    }
 
     const prPayload = {
       title: `${firstItemName} (Quote QUO-${quotation.id})`,
@@ -145,25 +163,50 @@ export const ensurePurchaseRequestForQuotation = async (quotation, performerId) 
   }
 };
 
-export const updateQuotationStatus = async (id, status, tenantId, performerId) => {
+export const updateQuotationStatus = async (id, payloadOrStatus, tenantId, performerId) => {
   const quotation = await getQuotationById(id, tenantId);
 
-  const updatedQuotation = await quotationRepository.updateQuotationStatus(id, status);
+  let status = typeof payloadOrStatus === 'string' ? payloadOrStatus : payloadOrStatus?.status;
+  if (!status) status = quotation.status;
 
-  // When quote is accepted / approved, ensure an approved Purchase Request is created dynamically
-  const normalizedStatus = String(status).toLowerCase();
-  if (normalizedStatus === 'approved' || normalizedStatus === 'accepted') {
-    await ensurePurchaseRequestForQuotation(quotation, performerId);
+  const dataToUpdate = { status };
+
+  if (typeof payloadOrStatus === 'object' && payloadOrStatus !== null) {
+    if (payloadOrStatus.amount !== undefined) {
+      dataToUpdate.amount = parseFloat(payloadOrStatus.amount);
+    }
+    if (payloadOrStatus.remarks !== undefined) {
+      dataToUpdate.remarks = payloadOrStatus.remarks;
+    }
+
+    const { status: _s, amount: _a, remarks: _r, ...incomingMeta } = payloadOrStatus;
+    const existingMeta = typeof quotation.metadata === 'object' && quotation.metadata !== null ? quotation.metadata : {};
+    dataToUpdate.metadata = {
+      ...existingMeta,
+      ...incomingMeta
+    };
   }
 
-  await logAudit({
-    module: 'QUOTATIONS',
-    action: 'STATUS_CHANGE',
-    description: `Quotation ${id} status changed to ${status}`,
-    oldValue: quotation,
-    newValue: updatedQuotation,
-    performedBy: performerId
-  });
+  const updatedQuotation = await quotationRepository.updateQuotationStatus(id, dataToUpdate);
+
+  // When quote is accepted / approved, ensure an approved Purchase Request is created or updated dynamically
+  const normalizedStatus = String(status).toLowerCase();
+  if (normalizedStatus === 'approved' || normalizedStatus === 'accepted') {
+    await ensurePurchaseRequestForQuotation(updatedQuotation, performerId);
+  }
+
+  try {
+    await logAudit({
+      module: 'QUOTATIONS',
+      action: 'STATUS_CHANGE',
+      description: `Quotation ${id} updated: status=${status}, amount=${dataToUpdate.amount ?? quotation.amount}`,
+      oldValue: quotation,
+      newValue: updatedQuotation,
+      performedBy: performerId
+    });
+  } catch (auditErr) {
+    console.warn(`[logAudit] Non-fatal audit log failure for quote ${id}:`, auditErr.message);
+  }
 
   return updatedQuotation;
 };

@@ -119,9 +119,8 @@ export const getQuotationById = async (req, res, next) => {
 export const updateQuotationStatus = async (req, res, next) => {
   try {
     const tenantIdToFilter = resolveTenantId(req);
-    const { status } = req.body;
 
-    const updatedQuotation = await quotationService.updateQuotationStatus(Number(req.params.id), status, tenantIdToFilter, req.user.id);
+    const updatedQuotation = await quotationService.updateQuotationStatus(Number(req.params.id), req.body, tenantIdToFilter, req.user.id);
     sendResponse(res, 200, 'Quotation status updated successfully', updatedQuotation);
   } catch (error) {
     next(error);

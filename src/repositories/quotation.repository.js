@@ -73,10 +73,11 @@ export const findAllQuotations = async (tenantId, query) => {
   return { quotations, total, page: Number(page), totalPages: Math.ceil(total / limit) };
 };
 
-export const updateQuotationStatus = async (id, status) => {
+export const updateQuotationStatus = async (id, statusOrData) => {
+  const data = typeof statusOrData === 'object' && statusOrData !== null ? statusOrData : { status: statusOrData };
   return await prisma.quotation.update({
     where: { id },
-    data: { status }
+    data
   });
 };
 

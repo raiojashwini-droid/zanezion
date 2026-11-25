@@ -8,5 +8,8 @@ export const createQuotationSchema = z.object({
 }).passthrough();
 
 export const updateQuotationStatusSchema = z.object({
-  status: z.enum(['pending', 'approved', 'rejected', 'expired'], { required_error: 'Valid status is required' })
-});
+  status: z.enum(['pending', 'approved', 'rejected', 'expired', 'accepted']).optional(),
+  amount: z.number().nonnegative().optional(),
+  remarks: z.string().optional(),
+  items: z.array(z.any()).optional()
+}).passthrough();
