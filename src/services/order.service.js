@@ -11,23 +11,42 @@ import { logAudit } from '../utils/audit.js';
 const validateAndReserveStock = async (tx, items) => {
   const itemsArray = items || [];
   for (const item of itemsArray) {
-    const stock = await tx.inventoryStock.findUnique({
-      where: { warehouseId_itemId: { warehouseId: item.warehouseId, itemId: item.itemId } }
-    });
+    if (!item.itemId || !item.quantity) continue;
+    const reqQty = Number(item.quantity);
 
-    if (!stock) {
-      throw new AppError(`Stock record not found for Item ${item.itemId} in Warehouse ${item.warehouseId}`, 400);
+    let stock = null;
+    if (item.warehouseId) {
+      stock = await tx.inventoryStock.findUnique({
+        where: { warehouseId_itemId: { warehouseId: item.warehouseId, itemId: item.itemId } }
+      });
     }
 
-    const availableQuantity = stock.quantity - stock.reservedQuantity;
-    if (availableQuantity < item.quantity) {
-      throw new AppError(`Insufficient stock for Item ${item.itemId}. Available: ${availableQuantity}, Requested: ${item.quantity}`, 400);
+    if (!stock) {
+      stock = await tx.inventoryStock.findFirst({
+        where: { itemId: item.itemId, quantity: { gt: 0 } },
+        orderBy: { quantity: 'desc' }
+      });
+    }
+
+    if (!stock) {
+      stock = await tx.inventoryStock.findFirst({
+        where: { itemId: item.itemId }
+      });
+    }
+
+    if (!stock) {
+      throw new AppError(`Stock record not found for Item ${item.itemId}`, 400);
+    }
+
+    const availableQuantity = (stock.quantity || 0) - (stock.reservedQuantity || 0);
+    if (availableQuantity < reqQty) {
+      throw new AppError(`Insufficient stock for Item ${item.itemId}. Available: ${Math.max(0, availableQuantity)}, Requested: ${reqQty}`, 400);
     }
 
     // Reserve stock
     await tx.inventoryStock.update({
       where: { id: stock.id },
-      data: { reservedQuantity: { increment: item.quantity } }
+      data: { reservedQuantity: { increment: reqQty } }
     });
   }
 };
@@ -35,17 +54,28 @@ const validateAndReserveStock = async (tx, items) => {
 const releaseReservedStock = async (tx, items) => {
   const itemsArray = items || [];
   for (const item of itemsArray) {
-    const stock = await tx.inventoryStock.findUnique({
-      where: { warehouseId_itemId: { warehouseId: item.warehouseId, itemId: item.itemId } }
-    });
+    if (!item.itemId || !item.quantity) continue;
+    let stock = null;
+    if (item.warehouseId) {
+      stock = await tx.inventoryStock.findUnique({
+        where: { warehouseId_itemId: { warehouseId: item.warehouseId, itemId: item.itemId } }
+      });
+    }
+
+    if (!stock) {
+      stock = await tx.inventoryStock.findFirst({
+        where: { itemId: item.itemId }
+      });
+    }
 
     if (stock) {
-      // Ensure we don't drop below 0 by releasing too much (sanity check)
-      const decrementVal = Math.min(stock.reservedQuantity, item.quantity);
-      await tx.inventoryStock.update({
-        where: { id: stock.id },
-        data: { reservedQuantity: { decrement: decrementVal } }
-      });
+      const decrementVal = Math.min(stock.reservedQuantity || 0, Number(item.quantity));
+      if (decrementVal > 0) {
+        await tx.inventoryStock.update({
+          where: { id: stock.id },
+          data: { reservedQuantity: { decrement: decrementVal } }
+        });
+      }
     }
   }
 };
@@ -443,6 +473,15 @@ export const createOrder = async (data, performerId, tenantId) => {
     orderData.orderType = 'Delivery';
   }
 
+  // Instant Stock Reservation on Order Placement
+  if (validOrderItems.length > 0) {
+    await validateAndReserveStock(prisma, validOrderItems);
+    orderData.metadata = {
+      ...(orderData.metadata || {}),
+      stockReserved: true
+    };
+  }
+
   const newOrder = await orderRepo.createOrder(orderData, validOrderItems, orderTenantId);
 
   await logAudit({
@@ -586,14 +625,16 @@ export const updateOrderStatus = async (id, status, tenantId, performerId, remar
   let updatedOrder;
 
   await prisma.$transaction(async (tx) => {
-    // If transitioning TO approved, Reserve Stock
-    if (normStatus === 'approved') {
+    // If order was not yet reserved and transitioning to approved, reserve stock
+    if (normStatus === 'approved' && !currentMeta.stockReserved) {
       await validateAndReserveStock(tx, order.items);
+      newMetadata.stockReserved = true;
     }
 
-    // If transitioning FROM approved TO cancelled, Release Stock
-    if (order.status === 'approved' && normStatus === 'cancelled') {
+    // If order had reserved stock and is cancelled or rejected, release reserved stock
+    if (['cancelled', 'rejected'].includes(normStatus) && !currentMeta.stockDeducted) {
       await releaseReservedStock(tx, order.items);
+      newMetadata.stockReserved = false;
     }
 
     // If order is completed/delivered, deduct stock

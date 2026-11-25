@@ -90,7 +90,7 @@ export const findAllItems = async (tenantId, query = {}) => {
       include: {
         category: { select: { name: true } },
         unit: { select: { name: true, shortName: true } },
-        inventoryStock: { select: { quantity: true, warehouseId: true } }
+        inventoryStock: { select: { quantity: true, reservedQuantity: true, warehouseId: true } }
       }
     }),
     prisma.item.count({ where })
