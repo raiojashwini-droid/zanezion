@@ -30,7 +30,7 @@ export const findRFQByPRAndVendor = async (purchaseRequestId, vendorId) => {
 };
 
 export const findAllRFQs = async (tenantId, query) => {
-  const { page = 1, limit = 10, search = '', status, purchaseRequestId, vendorId } = query;
+  const { page = 1, limit = 10, search = '', status, purchaseRequestId, vendorId, clientId, userId } = query;
   const skip = (page - 1) * limit;
 
   const where = {
@@ -41,6 +41,28 @@ export const findAllRFQs = async (tenantId, query) => {
     ...(vendorId && { vendorId: Number(vendorId) })
   };
 
+  if (clientId !== undefined || userId !== undefined) {
+    const clientFilters = [];
+    if (clientId && Number(clientId) !== -1) {
+      clientFilters.push(
+        { metadata: { path: '$.clientId', equals: Number(clientId) } },
+        { metadata: { path: '$.clientId', equals: String(clientId) } }
+      );
+    }
+    if (userId) {
+      clientFilters.push(
+        { metadata: { path: '$.userId', equals: Number(userId) } },
+        { metadata: { path: '$.userId', equals: String(userId) } },
+        { purchaseRequest: { requestedBy: Number(userId) } }
+      );
+    }
+    if (clientFilters.length > 0) {
+      where.OR = clientFilters;
+    } else {
+      where.id = -1;
+    }
+  }
+
   const [rfqs, total] = await Promise.all([
     prisma.rFQ.findMany({
       where,
@@ -49,7 +71,7 @@ export const findAllRFQs = async (tenantId, query) => {
       orderBy: { createdAt: 'desc' },
       include: {
         vendor: { select: { companyName: true, vendorCode: true } },
-        purchaseRequest: { select: { prNumber: true, title: true } }
+        purchaseRequest: { select: { prNumber: true, title: true, requestedBy: true } }
       }
     }),
     prisma.rFQ.count({ where })
