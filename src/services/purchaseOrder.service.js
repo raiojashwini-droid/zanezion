@@ -317,6 +317,28 @@ export const receivePurchaseOrderGoods = async (id, body, tenantId, performerId)
         });
       }
 
+      // Resolve linked client if this PO was sourced for a business client quotation
+      let linkedClientId = null;
+      if (po.quotationId) {
+        const linkedQuo = await tx.quotation.findUnique({ where: { id: po.quotationId } });
+        if (linkedQuo?.metadata?.clientId) {
+          linkedClientId = Number(linkedQuo.metadata.clientId);
+        }
+      }
+      if (!linkedClientId && po.purchaseRequestId) {
+        const linkedQuo = await tx.quotation.findFirst({
+          where: {
+            metadata: {
+              path: ['purchaseRequestId'],
+              equals: po.purchaseRequestId
+            }
+          }
+        });
+        if (linkedQuo?.metadata?.clientId) {
+          linkedClientId = Number(linkedQuo.metadata.clientId);
+        }
+      }
+
       for (const rItem of (items || [])) {
         if (Number(rItem.receivedQty) > 0) {
           const dbItem = allItems.find(it => it.id === Number(rItem.id));
@@ -347,8 +369,14 @@ export const receivePurchaseOrderGoods = async (id, body, tenantId, performerId)
                 sku,
                 name: dbItem.itemName,
                 price: Number(dbItem.estimatedCost || 0),
+                clientId: linkedClientId,
                 status: 'active'
               }
+            });
+          } else if (!invItem.clientId && linkedClientId) {
+            invItem = await tx.item.update({
+              where: { id: invItem.id },
+              data: { clientId: linkedClientId }
             });
           }
 
