@@ -50,6 +50,86 @@ const releaseReservedStock = async (tx, items) => {
   }
 };
 
+export const deductStockForOrderDelivery = async (tx, order) => {
+  let itemsToDeduct = [];
+  if (Array.isArray(order.items) && order.items.length > 0) {
+    itemsToDeduct = order.items.map(it => ({
+      itemId: it.itemId,
+      warehouseId: it.warehouseId,
+      quantity: Number(it.quantity || 1)
+    }));
+  } else {
+    let meta = order.metadata || {};
+    if (typeof meta === 'string') {
+      try { meta = JSON.parse(meta); } catch (_) { meta = {}; }
+    }
+    const metaList = Array.isArray(meta.manifestItems) && meta.manifestItems.length > 0
+      ? meta.manifestItems
+      : (Array.isArray(meta.items) && meta.items.length > 0 ? meta.items : (Array.isArray(meta.customItems) ? meta.customItems : []));
+    for (const mItem of metaList) {
+      const rawId = mItem.itemId || mItem.id;
+      if (rawId && !isNaN(Number(rawId))) {
+        itemsToDeduct.push({
+          itemId: Number(rawId),
+          warehouseId: mItem.warehouseId ? Number(mItem.warehouseId) : null,
+          quantity: Number(mItem.quantity || mItem.qty || 1)
+        });
+      }
+    }
+  }
+
+  for (const item of itemsToDeduct) {
+    if (!item.itemId || !item.quantity || item.quantity <= 0) continue;
+    const reqQty = Number(item.quantity);
+
+    let stock = null;
+    if (item.warehouseId) {
+      stock = await tx.inventoryStock.findUnique({
+        where: { warehouseId_itemId: { warehouseId: item.warehouseId, itemId: item.itemId } }
+      });
+    }
+
+    if (!stock) {
+      stock = await tx.inventoryStock.findFirst({
+        where: { itemId: item.itemId, quantity: { gt: 0 } },
+        orderBy: { quantity: 'desc' }
+      });
+    }
+
+    if (!stock) {
+      stock = await tx.inventoryStock.findFirst({
+        where: { itemId: item.itemId }
+      });
+    }
+
+    if (stock) {
+      const newQty = Math.max(0, stock.quantity - reqQty);
+      const newReserved = Math.max(0, (stock.reservedQuantity || 0) - reqQty);
+
+      await tx.inventoryStock.update({
+        where: { id: stock.id },
+        data: {
+          quantity: newQty,
+          reservedQuantity: newReserved
+        }
+      });
+
+      await tx.stockMovement.create({
+        data: {
+          tenantId: stock.tenantId || order.tenantId || 1,
+          warehouseId: stock.warehouseId,
+          itemId: stock.itemId,
+          movementType: 'OUT',
+          quantity: reqQty,
+          referenceType: 'DELIVERY',
+          referenceId: String(order.id),
+          remarks: `Order #${order.orderNumber || order.id} delivered and stock deducted`
+        }
+      });
+    }
+  }
+};
+
 // --- Order Methods ---
 
 export const createOrder = async (data, performerId, tenantId) => {
@@ -514,6 +594,15 @@ export const updateOrderStatus = async (id, status, tenantId, performerId, remar
     // If transitioning FROM approved TO cancelled, Release Stock
     if (order.status === 'approved' && normStatus === 'cancelled') {
       await releaseReservedStock(tx, order.items);
+    }
+
+    // If order is completed/delivered, deduct stock
+    if (['completed', 'delivered'].includes(normStatus)) {
+      if (!currentMeta.stockDeducted) {
+        await deductStockForOrderDelivery(tx, order);
+        newMetadata.stockDeducted = true;
+        newMetadata.stockDeductedAt = new Date().toISOString();
+      }
     }
 
     // Update order status + persist new metadata with workflow history
@@ -1045,6 +1134,12 @@ export const updateOrder = async (id, data, tenantId, performerId) => {
     ...metadataExt
   };
   delete finalMetadata.metadata;
+
+  if (['completed', 'delivered'].includes(newStatus) && !finalMetadata.stockDeducted) {
+    await deductStockForOrderDelivery(prisma, order);
+    finalMetadata.stockDeducted = true;
+    finalMetadata.stockDeductedAt = new Date().toISOString();
+  }
 
   const updatedOrder = await prisma.order.update({
     where: { id: order.id },

@@ -495,7 +495,17 @@ export const ensureDeliveryForOrder = async (orderOrId, tx = null) => {
       vehicleRef: meta.plateNumber || meta.vehicleId || null,
       pickupLocation,
       dropLocation,
-      remarks: JSON.stringify(remarksData)
+      remarks: JSON.stringify(remarksData),
+      ...(Array.isArray(order.items) && order.items.filter(it => it.id && it.itemId).length > 0 ? {
+        items: {
+          create: order.items.filter(it => it.id && it.itemId).map(it => ({
+            tenantId: order.tenantId || 1,
+            orderItemId: it.id,
+            itemId: it.itemId,
+            quantity: it.quantity
+          }))
+        }
+      } : {})
     }
   });
 };
@@ -596,9 +606,10 @@ export const updateDelivery = async (id, data, tenantId, performerId, clientId =
     throw new AppError(`Cannot update delivery in ${delivery.status} status`, 400);
   }
 
-  // Determine if we need to dispatch and decrement stock
-  const isTransitioningToDispatch = ['en_route', 'dispatched', 'in_transit'].includes(data.status) && 
-    !['en_route', 'dispatched', 'in_transit', 'delivered'].includes(delivery.status);
+  // Determine if delivery is transitioning to delivered
+  const normNewStatus = String(data.status || '').toLowerCase();
+  const isTransitioningToDelivered = ['delivered', 'completed'].includes(normNewStatus) && 
+    !['delivered', 'completed'].includes(String(delivery.status || '').toLowerCase());
 
   let updatedDelivery;
 
@@ -756,8 +767,8 @@ export const updateDelivery = async (id, data, tenantId, performerId, clientId =
 
   const targetDeliveryId = delivery.id;
 
-  if (isTransitioningToDispatch) {
-    // Run delivery update + stock decrement atomically in one transaction
+  if (isTransitioningToDelivered && (!delivery.orderId || isNaN(Number(delivery.orderId)))) {
+    // For standalone deliveries without an order: decrement stock upon full delivery
     await prisma.$transaction(async (tx) => {
       updatedDelivery = await tx.delivery.update({
         where: { id: targetDeliveryId },
@@ -765,7 +776,7 @@ export const updateDelivery = async (id, data, tenantId, performerId, clientId =
         include: { items: true, client: true, order: true }
       });
 
-      for (const item of delivery.items) {
+      for (const item of (delivery.items || [])) {
         const stock = await tx.inventoryStock.findUnique({
           where: { warehouseId_itemId: { warehouseId: delivery.warehouseId, itemId: item.itemId } }
         });
@@ -785,14 +796,14 @@ export const updateDelivery = async (id, data, tenantId, performerId, clientId =
               quantity: item.quantity,
               referenceType: 'DELIVERY',
               referenceId: String(targetDeliveryId),
-              remarks: `Dispatched via Delivery status update to ${data.status}`
+              remarks: `Fulfilled via Delivery #${delivery.deliveryNumber || targetDeliveryId} delivered to recipient`
             }
           });
         }
       }
     });
   } else {
-    // No stock changes needed — plain update
+    // Plain update (if linked to order, the order update below handles atomic order stock deduction)
     updatedDelivery = await deliveryRepo.updateDelivery(targetDeliveryId, parsedData);
   }
 
