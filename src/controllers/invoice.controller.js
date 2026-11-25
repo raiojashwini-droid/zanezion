@@ -37,10 +37,6 @@ export const getInvoices = async (req, res, next) => {
       } else {
         req.query.clientId = -1; // Unlinked customer/business has 0 invoices
       }
-    } else if (['SAAS_CLIENT'].includes(roleName)) {
-      if (req.user.clientId) {
-        req.query.clientId = req.user.clientId;
-      }
     }
 
     const result = await invoiceService.getInvoices(tenantIdToFilter, req.query);
@@ -54,7 +50,7 @@ export const getInvoiceById = async (req, res, next) => {
   try {
     const tenantIdToFilter = resolveTenantId(req);
     const roleName = String(req.user.role?.name || req.user.role || '').toUpperCase();
-    let clientIdToFilter = ['INDIVIDUAL_CLIENT', 'CUSTOMER', 'BUSINESS_CLIENT', 'CLIENT', 'SAAS_CLIENT'].includes(roleName) ? req.user.clientId : null;
+    let clientIdToFilter = ['INDIVIDUAL_CLIENT', 'CUSTOMER', 'BUSINESS_CLIENT', 'CLIENT'].includes(roleName) ? req.user.clientId : null;
     if (!clientIdToFilter && ['INDIVIDUAL_CLIENT', 'CUSTOMER', 'BUSINESS_CLIENT', 'CLIENT'].includes(roleName)) {
       const clientRec = await prisma.client.findFirst({
         where: {
