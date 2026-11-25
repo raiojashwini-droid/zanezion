@@ -12,8 +12,11 @@ export const createItemSchema = z.object({
   warehouseId: z.number().int().positive().optional(),
   price: z.number().nonnegative().optional(),
   inventoryType: z.string().optional(),
-  clientId: z.number().int().positive().optional().nullable()
-});
+  clientId: z.number().int().positive().optional().nullable(),
+  vendorId: z.number().optional().nullable(),
+  vendorName: z.string().optional().nullable(),
+  vendor: z.string().optional().nullable()
+}).passthrough();
 
 export const updateItemSchema = z.object({
   categoryId: z.number().int().positive().optional(),
@@ -28,5 +31,8 @@ export const updateItemSchema = z.object({
   qty: z.number().nonnegative().optional(),
   warehouseId: z.number().int().positive().optional(),
   inventoryType: z.string().optional(),
-  clientId: z.number().int().positive().optional().nullable()
-});
+  clientId: z.number().int().positive().optional().nullable(),
+  vendorId: z.number().optional().nullable(),
+  vendorName: z.string().optional().nullable(),
+  vendor: z.string().optional().nullable()
+}).passthrough();

@@ -27,7 +27,12 @@ export const createItem = async (data, performerId, tenantId) => {
     throw new AppError('Item with this SKU already exists', 400);
   }
 
-  const createPayload = { ...data, sku: finalSku, tenantId };
+  let description = data.description || '';
+  const vName = data.vendorName || data.vendor;
+  if (vName && !description.includes('[vendor:')) {
+    description = `${description} [vendor:${vName}]`.trim();
+  }
+  const createPayload = { ...data, description, sku: finalSku, tenantId };
 
   if (data.qty && data.warehouseId) {
     createPayload.inventoryStock = {
@@ -39,10 +44,12 @@ export const createItem = async (data, performerId, tenantId) => {
     };
   }
 
-  // Remove qty and warehouseId from root level so Prisma doesn't complain
+  // Remove non-model fields so Prisma doesn't complain
   delete createPayload.qty;
   delete createPayload.warehouseId;
-
+  delete createPayload.vendorName;
+  delete createPayload.vendor;
+  delete createPayload.vendorId;
 
   const newItem = await itemRepo.createItem(createPayload);
 
@@ -86,11 +93,23 @@ export const updateItem = async (id, data, tenantId, performerId) => {
   }
 
   const updatePayload = { ...data };
+  const vName = updatePayload.vendorName || updatePayload.vendor;
+  if (vName !== undefined) {
+    let desc = (updatePayload.description !== undefined ? updatePayload.description : item.description) || '';
+    desc = desc.replace(/\[vendor:.*?\]/g, '').trim();
+    if (vName) {
+      desc = `${desc} [vendor:${vName}]`.trim();
+    }
+    updatePayload.description = desc;
+  }
   const qty = updatePayload.qty !== undefined ? Number(updatePayload.qty) : null;
   const warehouseId = updatePayload.warehouseId ? parseInt(updatePayload.warehouseId, 10) : null;
 
   delete updatePayload.qty;
   delete updatePayload.warehouseId;
+  delete updatePayload.vendorName;
+  delete updatePayload.vendor;
+  delete updatePayload.vendorId;
 
   const updatedItem = await itemRepo.updateItem(id, updatePayload);
 

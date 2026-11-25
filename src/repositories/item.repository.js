@@ -115,10 +115,17 @@ export const findAllItems = async (tenantId, query = {}) => {
           vendor: { select: { companyName: true } }
         }
       });
+      let vendorName = latestPO?.vendor?.companyName || null;
+      if (!vendorName && item.description) {
+        const match = item.description.match(/\[vendor:\s*(.*?)\]/);
+        if (match) vendorName = match[1];
+      }
+      const cleanDescription = (item.description || '').replace(/\[vendor:.*?\]/g, '').trim();
       return {
         ...item,
-        vendorName: latestPO?.vendor?.companyName || null,
-        store: latestPO?.vendor?.companyName || null
+        description: cleanDescription,
+        vendorName: vendorName || null,
+        store: vendorName || null
       };
     } catch (_) {
       return item;
