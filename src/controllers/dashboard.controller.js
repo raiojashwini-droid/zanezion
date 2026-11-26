@@ -215,6 +215,21 @@ export const getDashboardStats = async (req, res, next) => {
     const revenueTrendValue = prevRevenue > 0 ? ((relevantRevenue - prevRevenue) / prevRevenue * 100).toFixed(1) : (relevantRevenue > 0 ? 100 : 0);
     const revenueTrend = revenueTrendValue > 0 ? `+${revenueTrendValue}%` : `${revenueTrendValue}%`;
 
+    // Outstanding Revenue Trends
+    const relevantOutstandingRevenue = invoices
+      .filter(i => new Date(i.invoiceDate || i.createdAt) >= thresholdDate && i.status !== 'Paid' && i.status !== 'paid')
+      .reduce((acc, i) => acc + (i.totalAmount || 0), 0);
+
+    const prevOutstandingRevenue = invoices
+      .filter(i => {
+         const d = new Date(i.invoiceDate || i.createdAt);
+         return d >= prevThresholdDate && d < thresholdDate && i.status !== 'Paid' && i.status !== 'paid';
+      })
+      .reduce((acc, i) => acc + (i.totalAmount || 0), 0);
+
+    const outstandingTrendValue = prevOutstandingRevenue > 0 ? ((relevantOutstandingRevenue - prevOutstandingRevenue) / prevOutstandingRevenue * 100).toFixed(1) : (relevantOutstandingRevenue > 0 ? 100 : 0);
+    const outstandingTrend = outstandingTrendValue > 0 ? `+${outstandingTrendValue}%` : `${outstandingTrendValue}%`;
+
     // Orders trend (compare current period vs previous period)
     const currentPeriodOrders = await prisma.order.count({ where: { ...filter, createdAt: { gte: thresholdDate } } });
     const prevPeriodOrders = await prisma.order.count({ where: { ...filter, createdAt: { gte: prevThresholdDate, lt: thresholdDate } } });
@@ -247,6 +262,8 @@ export const getDashboardStats = async (req, res, next) => {
       unpaidInvoices,
       totalRevenue,
       relevantRevenue,
+      outstandingRevenue: relevantOutstandingRevenue,
+      outstandingTrend,
       prevRevenue,
       revenueTrend,
       ordersTrend,
